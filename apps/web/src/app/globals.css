@@ -1,26 +1,234 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/*
+ * Carezino design tokens.
+ *
+ * Raw values live on :root (light) and .dark (reserved for later). Tailwind utilities
+ * are generated from them through @theme inline, so components only ever reference
+ * semantic names such as bg-surface, text-muted-foreground or border-border.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand */
+  --primary: #0d9488;
+  --primary-hover: #0f766e;
+  --primary-subtle: #f0fdfa;
+  --primary-subtle-foreground: #0f766e;
+  --primary-foreground: #ffffff;
+
+  /* Neutrals */
+  --background: #f8fafc;
+  --foreground: #1e293b;
+  --surface: #ffffff;
+  --surface-foreground: #1e293b;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --subtle-foreground: #94a3b8;
+  --accent: #f1f5f9;
+  --accent-foreground: #1e293b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --input: #cbd5e1;
+  --ring: #0d9488;
+
+  /* Semantic */
+  --success: #16a34a;
+  --success-subtle: #f0fdf4;
+  --success-foreground: #15803d;
+  --warning: #d97706;
+  --warning-subtle: #fffbeb;
+  --warning-foreground: #b45309;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-subtle: #fef2f2;
+  --danger-foreground: #b91c1c;
+  --info: #2563eb;
+  --info-subtle: #eff6ff;
+  --info-foreground: #1d4ed8;
+
+  /* Discipline accents, used sparingly (calendar blocks, small dots) */
+  --discipline-ot: #0d9488;
+  --discipline-aba: #7c3aed;
+  --discipline-slt: #db2777;
+  --discipline-other: #64748b;
+
+  /* Layout */
+  --sidebar: #ffffff;
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 64px;
+  --topbar-height: 64px;
+  --content-max-width: 1440px;
+
+  /* Elevation: keep it quiet */
+  --shadow-xs: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.04);
+  --shadow-md: 0 8px 24px -6px rgb(15 23 42 / 0.12), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+}
+
+/* Dark tokens are structured but not yet exposed in the UI. */
+.dark {
+  --primary: #14b8a6;
+  --primary-hover: #2dd4bf;
+  --primary-subtle: #042f2e;
+  --primary-subtle-foreground: #5eead4;
+  --primary-foreground: #042f2e;
+  --background: #0b1120;
+  --foreground: #e2e8f0;
+  --surface: #111827;
+  --surface-foreground: #e2e8f0;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --subtle-foreground: #64748b;
+  --accent: #1e293b;
+  --accent-foreground: #e2e8f0;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --input: #334155;
+  --ring: #14b8a6;
+  --success-subtle: #052e16;
+  --success-foreground: #4ade80;
+  --warning-subtle: #451a03;
+  --warning-foreground: #fbbf24;
+  --danger-subtle: #450a0a;
+  --danger-foreground: #f87171;
+  --info-subtle: #172554;
+  --info-foreground: #60a5fa;
+  --sidebar: #0f172a;
 }
 
 @theme inline {
+  --font-sans:
+    var(--font-inter), var(--font-bangla), ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    sans-serif;
+  --font-bangla: var(--font-hind-siliguri), var(--font-inter), sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-subtle-foreground: var(--primary-subtle-foreground);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-foreground: var(--info-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-discipline-ot: var(--discipline-ot);
+  --color-discipline-aba: var(--discipline-aba);
+  --color-discipline-slt: var(--discipline-slt);
+  --color-discipline-other: var(--discipline-other);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+
+  /* Type scale (sizes in px per the Carezino spec) */
+  --text-page-title: 1.5rem;
+  --text-page-title--line-height: 2rem;
+  --text-page-title--font-weight: 600;
+  --text-section-title: 1.125rem;
+  --text-section-title--line-height: 1.75rem;
+  --text-section-title--font-weight: 600;
+  --text-card-title: 1rem;
+  --text-card-title--line-height: 1.5rem;
+  --text-card-title--font-weight: 600;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.25rem;
+  --text-kpi: 1.75rem;
+  --text-kpi--line-height: 2.25rem;
+  --text-kpi--font-weight: 600;
+
+  --animate-in: fade-in 150ms ease-out;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family:
+      var(--font-inter), var(--font-hind-siliguri), ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5rem;
+  }
+
+  /* Bangla script needs a little more vertical room for matras and conjuncts. */
+  :lang(bn) {
+    font-family: var(--font-hind-siliguri), var(--font-inter), sans-serif;
+    line-height: 1.7;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 20%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--surface),
+      0 0 0 4px var(--ring);
+  }
 }
