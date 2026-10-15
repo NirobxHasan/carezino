@@ -79,7 +79,8 @@ export const settingsNav: NavItem = {
   title: 'Settings',
   href: '/settings',
   icon: Settings,
-  permission: 'settings.manage',
+  // Center profile and staff live here; managers see them read-only.
+  permission: 'staff.read',
 };
 
 /** Labels for static path segments, used by breadcrumbs. */
@@ -95,6 +96,9 @@ export const segmentLabels: Record<string, string> = {
   finance: 'Finance',
   reports: 'Reports',
   settings: 'Settings',
+  center: 'Center profile',
+  staff: 'Staff',
+  profile: 'My profile',
   'design-system': 'Design system',
   new: 'New',
   edit: 'Edit',

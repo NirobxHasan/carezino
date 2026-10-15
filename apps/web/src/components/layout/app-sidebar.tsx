@@ -6,7 +6,6 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 import { Logo } from '@/components/brand/logo';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useConfig } from '@/lib/api/config';
 import { useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 import { isActive, navGroups, settingsNav, type NavItem } from './nav';
@@ -118,14 +117,12 @@ export function SidebarNavFallback() {
 }
 
 export function CenterBadge({ collapsed }: { collapsed: boolean }) {
-  const { data } = useConfig();
+  const { activeCenter } = useSession();
   if (collapsed) return null;
   return (
     <div className="min-w-0 border-t border-border px-5 py-3">
-      <p className="truncate text-[13px] font-medium text-foreground">{data?.center.name ?? ' '}</p>
-      <p className="truncate text-xs text-muted-foreground">
-        {data ? `${data.center.branch} branch` : ' '}
-      </p>
+      <p className="truncate text-[13px] font-medium text-foreground">{activeCenter.name}</p>
+      <p className="truncate text-xs text-muted-foreground tabular">{activeCenter.code}</p>
     </div>
   );
 }

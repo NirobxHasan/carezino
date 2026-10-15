@@ -204,20 +204,25 @@ export function createSeed() {
       id: 'usr_manager',
       name: 'Nadia Chowdhury',
       email: 'nadia@shishubikash.example',
-      role: 'manager',
+      role: 'MANAGER',
     },
-    { id: 'usr_admin', name: 'Kamrul Islam', email: 'kamrul@shishubikash.example', role: 'admin' },
+    {
+      id: 'usr_admin',
+      name: 'Kamrul Islam',
+      email: 'kamrul@shishubikash.example',
+      role: 'CENTER_ADMIN',
+    },
     {
       id: 'usr_reception',
       name: 'Rafiq Uddin',
       email: 'rafiq@shishubikash.example',
-      role: 'receptionist',
+      role: 'RECEPTIONIST',
     },
     {
       id: 'usr_therapist',
       name: 'Farhana Rahman',
       email: 'farhana@shishubikash.example',
-      role: 'therapist',
+      role: 'THERAPIST',
       therapistId: 'th_1',
     },
   ];
@@ -860,12 +865,10 @@ export function createSeed() {
       status: appt.noteStatus === 'submitted' ? 'submitted' : 'draft',
       activities: pick(activities[typeId]),
       participation: pick(['excellent', 'good', 'good', 'fair', 'poor'] as const),
-      goals: patientGoals
-        .slice(0, 2)
-        .map((g) => ({
-          goalId: g.id,
-          progress: pick(['emerging', 'progressing', 'progressing', 'achieved'] as const),
-        })),
+      goals: patientGoals.slice(0, 2).map((g) => ({
+        goalId: g.id,
+        progress: pick(['emerging', 'progressing', 'progressing', 'achieved'] as const),
+      })),
       observations:
         appt.noteStatus === 'draft'
           ? ''

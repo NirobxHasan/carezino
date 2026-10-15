@@ -1,6 +1,25 @@
-import type { Role } from './types';
+import type { ActiveCenter, Role } from './types';
 
-export type Permission =
+/**
+ * Permissions the API enforces. The web app reads the signed-in user's grants for the
+ * active center from GET /auth/me rather than re-deriving them, so the two can't drift.
+ */
+export const API_PERMISSIONS = [
+  'center.read',
+  'center.update',
+  'staff.read',
+  'staff.create',
+  'staff.update',
+  'staff.deactivate',
+  'staff.assign_role',
+  'profile.read',
+  'profile.update',
+] as const;
+
+export type ApiPermission = (typeof API_PERMISSIONS)[number];
+
+/** Permissions for prototype modules that aren't on the API yet. */
+export type ModulePermission =
   | 'dashboard.view'
   | 'appointments.view'
   | 'appointments.manage'
@@ -14,10 +33,11 @@ export type Permission =
   | 'packages.manage'
   | 'finance.view'
   | 'finance.manage'
-  | 'reports.view'
-  | 'settings.manage';
+  | 'reports.view';
 
-const ALL: Permission[] = [
+export type Permission = ApiPermission | ModulePermission;
+
+const ALL_MODULES: ModulePermission[] = [
   'dashboard.view',
   'appointments.view',
   'appointments.manage',
@@ -32,17 +52,16 @@ const ALL: Permission[] = [
   'finance.view',
   'finance.manage',
   'reports.view',
-  'settings.manage',
 ];
 
 /**
- * Role → permission map. The API is the source of truth for enforcement; the web app
- * uses this only to decide what to show.
+ * Role → prototype-module permission map, used only to decide what to show. Move each
+ * module's permissions to the API (apps/api/src/auth/permissions.ts) when it gets built.
  */
-export const rolePermissions: Record<Role, Permission[]> = {
-  admin: ALL,
-  manager: ALL.filter((p) => p !== 'settings.manage'),
-  receptionist: [
+export const modulePermissions: Record<Role, ModulePermission[]> = {
+  CENTER_ADMIN: ALL_MODULES,
+  MANAGER: ALL_MODULES,
+  RECEPTIONIST: [
     'dashboard.view',
     'appointments.view',
     'appointments.manage',
@@ -53,7 +72,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
     'finance.view',
     'finance.manage',
   ],
-  therapist: [
+  THERAPIST: [
     'dashboard.view',
     'appointments.view',
     'patients.view',
@@ -64,13 +83,29 @@ export const rolePermissions: Record<Role, Permission[]> = {
   ],
 };
 
+export const ROLES: Role[] = ['CENTER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'THERAPIST'];
+
 export const roleLabels: Record<Role, string> = {
-  admin: 'Administrator',
-  manager: 'Center manager',
-  receptionist: 'Receptionist',
-  therapist: 'Therapist',
+  CENTER_ADMIN: 'Administrator',
+  MANAGER: 'Center manager',
+  RECEPTIONIST: 'Receptionist',
+  THERAPIST: 'Therapist',
 };
 
-export function can(role: Role, permission: Permission) {
-  return rolePermissions[role].includes(permission);
+export const roleDescriptions: Record<Role, string> = {
+  CENTER_ADMIN: 'Full access, including center settings, staff and roles.',
+  MANAGER: 'Runs day-to-day operations and sees the team. No access to settings or roles.',
+  RECEPTIONIST: 'Front desk: registration, bookings and payments.',
+  THERAPIST: 'Their own schedule, patients, assessments and session notes.',
+};
+
+function isApiPermission(permission: Permission): permission is ApiPermission {
+  return (API_PERMISSIONS as readonly string[]).includes(permission);
+}
+
+/** UI-only check: hides what the user can't use. The API still enforces every request. */
+export function can(active: ActiveCenter | null | undefined, permission: Permission) {
+  if (!active) return false;
+  if (isApiPermission(permission)) return active.permissions.includes(permission);
+  return modulePermissions[active.role].includes(permission);
 }

@@ -25,13 +25,6 @@ export async function getConfig(): Promise<AppConfig> {
   });
 }
 
-export async function updateCenter(input: Partial<Center>) {
-  await latency();
-  const db = backend();
-  Object.assign(db.center, input);
-  return clone(db.center);
-}
-
 export async function saveTherapyType(input: Omit<TherapyType, 'id'> & { id?: string }) {
   await latency();
   const db = backend();
@@ -74,14 +67,6 @@ export function useTherapyTypes() {
     };
   }, [data]);
   return { ...derived, isLoading };
-}
-
-export function useUpdateCenter() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: updateCenter,
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.config }),
-  });
 }
 
 export function useSaveTherapyType() {

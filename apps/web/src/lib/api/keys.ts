@@ -1,5 +1,12 @@
 /** Central query keys, so mutations can invalidate precisely. */
 export const keys = {
+  me: ['auth', 'me'] as const,
+  platformCenters: (params?: object) => ['platform', 'centers', params ?? {}] as const,
+  platformCenter: (id: string) => ['platform', 'center', id] as const,
+  center: ['center', 'current'] as const,
+  staff: (params?: object) => ['staff', 'list', params ?? {}] as const,
+  staffMember: (id: string) => ['staff', 'detail', id] as const,
+  invitations: ['staff', 'invitations'] as const,
   config: ['config'] as const,
   patients: (params?: object) => ['patients', params ?? {}] as const,
   patient: (id: string) => ['patients', 'detail', id] as const,

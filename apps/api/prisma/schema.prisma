@@ -1,0 +1,184 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Tenancy ─────────────────────────────────────────────────────────────────
+// Every center-owned record carries `centerId`. Services resolve the center from the
+// caller's validated membership (see src/tenancy), never from request input.
+
+enum CenterStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model Center {
+  id        String       @id @default(uuid()) @db.Uuid
+  /// Human-readable, immutable identifier, e.g. SBTC-4821
+  code      String       @unique
+  name      String
+  phone     String
+  email     String?
+  address   String
+  district  String?
+  country   String       @default("Bangladesh")
+  timezone  String       @default("Asia/Dhaka")
+  currency  String       @default("BDT")
+  logoUrl   String?
+  website   String?
+  status    CenterStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  memberships CenterMembership[]
+  invitations Invitation[]
+  auditLogs   AuditLog[]
+  sessions    Session[]
+}
+
+// ── Identity ────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+/// A global identity. What a user may do is decided per center by CenterMembership.
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  fullName        String
+  /// Stored trimmed and lower-cased
+  email           String     @unique
+  /// Stored as 11 local digits, e.g. 01712345678
+  mobile          String?
+  passwordHash    String
+  status          UserStatus @default(ACTIVE)
+  /// Sign-in name for platform administrators (/admin/login). Stored lower-cased.
+  username        String?    @unique
+  /// Platform operators (super admins) see and register every center
+  isPlatformAdmin Boolean    @default(false)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  memberships         CenterMembership[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  invitationsSent     Invitation[]         @relation("InvitedBy")
+  auditLogs           AuditLog[]
+}
+
+// ── Access ──────────────────────────────────────────────────────────────────
+
+/// Fixed roles; their permissions are mapped in src/auth/permissions.ts.
+enum Role {
+  CENTER_ADMIN
+  MANAGER
+  RECEPTIONIST
+  THERAPIST
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model CenterMembership {
+  id        String           @id @default(uuid()) @db.Uuid
+  centerId  String           @db.Uuid
+  userId    String           @db.Uuid
+  role      Role
+  status    MembershipStatus @default(ACTIVE)
+  joinedAt  DateTime         @default(now())
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([centerId, userId])
+  @@index([userId])
+  @@index([centerId, status, role])
+}
+
+/// Server-side browser session. The cookie holds a random token; only its SHA-256 is stored.
+model Session {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  tokenHash      String    @unique
+  /// The center this session is working in; re-validated against memberships on every request
+  activeCenterId String?   @db.Uuid
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  lastUsedAt     DateTime  @default(now())
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeCenter Center? @relation(fields: [activeCenterId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Pending access to a center. A membership is only created when the invitee accepts.
+model Invitation {
+  id             String    @id @default(uuid()) @db.Uuid
+  centerId       String    @db.Uuid
+  /// Stored trimmed and lower-cased
+  email          String
+  fullName       String
+  mobile         String?
+  role           Role
+  tokenHash      String    @unique
+  invitedById    String    @db.Uuid
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  acceptedUserId String?   @db.Uuid
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  center    Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  invitedBy User   @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Restrict)
+
+  @@index([centerId, email])
+}
+
+// ── Audit ───────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  centerId    String?  @db.Uuid
+  actorUserId String?  @db.Uuid
+  /// Dotted action name, e.g. staff.role_changed
+  action      String
+  entityType  String
+  entityId    String?
+  /// Non-sensitive details such as before/after values. Never credentials or tokens.
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  center Center? @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  actor  User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([centerId, createdAt])
+}

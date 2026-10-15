@@ -30,7 +30,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { SegmentedList, SegmentedTrigger, Tabs } from '@/components/ui/tabs';
 import { AppointmentCard } from '@/features/appointments/appointment-card';
-import { useConfig } from '@/lib/api/config';
 import { paymentMethodLabels } from '@/lib/api/finance';
 import { useDashboard, type DashboardAlert } from '@/lib/api/dashboard';
 import { formatAgo, formatRelativeDay, formatTaka, formatTime } from '@/lib/format';
@@ -43,9 +42,8 @@ function greeting(date: Date) {
 }
 
 export function DashboardScreen() {
-  const { user, role, can } = useSession();
-  const { data: config } = useConfig();
-  const therapistId = role === 'therapist' ? user.therapistId : undefined;
+  const { user, role, can, activeCenter } = useSession();
+  const therapistId = role === 'THERAPIST' ? user.therapistId : undefined;
   const { data, isLoading, error, refetch } = useDashboard({ therapistId });
   const [filterChoice, setFilter] = React.useState<'remaining' | 'all' | 'done' | null>(null);
   const now = new Date();
@@ -68,7 +66,7 @@ export function DashboardScreen() {
     <div className="animate-in">
       <PageHeader
         title={`${greeting(now)}, ${user.name.split(' ')[0]}`}
-        description={`${format(now, 'EEEE, d MMMM')}${config ? ` · ${config.center.branch} branch` : ''}`}
+        description={`${format(now, 'EEEE, d MMMM')} · ${activeCenter.name}`}
         actions={
           <>
             {can('patients.manage') && (

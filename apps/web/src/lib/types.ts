@@ -28,15 +28,141 @@ export interface Center {
   weekStartsOn: 0 | 1 | 6;
 }
 
-export type Role = 'admin' | 'manager' | 'receptionist' | 'therapist';
+/** Fixed roles; what each may do is mapped in lib/permissions.ts and enforced by the API. */
+export type Role = 'CENTER_ADMIN' | 'MANAGER' | 'RECEPTIONIST' | 'THERAPIST';
 
+/** The signed-in user as prototype screens see them (see useSession). */
 export interface User {
   id: ID;
   name: string;
   email: string;
   role: Role;
-  /** Set when the user is also a therapist */
+  /** Set when the user is also a therapist (linked once the therapists module exists) */
   therapistId?: ID;
+}
+
+// ── Accounts & access (served by the API) ──────────────────────────────────
+
+export type MembershipStatus = 'ACTIVE' | 'INACTIVE';
+
+/** The center profile, as GET /centers/current returns it. */
+export interface CenterProfile {
+  id: ID;
+  /** Immutable, e.g. SBTC-4821 */
+  code: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  district: string | null;
+  country: string;
+  timezone: string;
+  currency: string;
+  logoUrl: string | null;
+  website: string | null;
+  status: 'ACTIVE' | 'SUSPENDED';
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+/** A center the signed-in user can work in. */
+export interface CenterSummary {
+  id: ID;
+  code: string;
+  name: string;
+  logoUrl: string | null;
+  role: Role;
+}
+
+export interface ActiveCenter extends CenterSummary {
+  membershipId: ID;
+  timezone: string;
+  currency: string;
+  permissions: string[];
+}
+
+/** GET /auth/me */
+export interface Me {
+  user: {
+    id: ID;
+    fullName: string;
+    email: string;
+    mobile: string | null;
+    /** Set for platform administrators, who sign in at /admin/login */
+    username: string | null;
+    isPlatformAdmin: boolean;
+  };
+  /** Null when the user has several centers and hasn't picked one, or has none */
+  activeCenter: ActiveCenter | null;
+  centers: CenterSummary[];
+}
+
+/** A center membership, with the person's identity. */
+export interface StaffMember {
+  /** Membership ID */
+  id: ID;
+  userId: ID;
+  fullName: string;
+  email: string;
+  mobile: string | null;
+  role: Role;
+  status: MembershipStatus;
+  joinedAt: ISODateTime;
+  updatedAt: ISODateTime;
+  isYou: boolean;
+}
+
+export interface StaffInvitation {
+  id: ID;
+  email: string;
+  fullName: string;
+  mobile: string | null;
+  role: Role;
+  expiresAt: ISODateTime;
+  createdAt: ISODateTime;
+  invitedByName: string;
+  expired: boolean;
+}
+
+// ── Platform (super admin) ──────────────────────────────────────────────────
+
+export interface CenterAdministrator {
+  /** Membership ID */
+  id: ID;
+  fullName: string;
+  email: string;
+  mobile: string | null;
+  status: MembershipStatus;
+  joinedAt: ISODateTime;
+}
+
+export interface PlatformCenterListItem {
+  id: ID;
+  code: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  district: string | null;
+  status: CenterProfile['status'];
+  createdAt: ISODateTime;
+  activeStaff: number;
+  primaryAdmin: CenterAdministrator | null;
+}
+
+export interface PlatformCenterDetail extends CenterProfile {
+  administrators: CenterAdministrator[];
+  counts: { activeStaff: number; inactiveStaff: number; pendingInvitations: number };
+}
+
+export interface InvitationPreview {
+  valid: true;
+  centerName: string;
+  email: string;
+  fullName: string;
+  mobile: string | null;
+  role: Role;
+  expiresAt: ISODateTime;
+  accountExists: boolean;
 }
 
 // ── Configuration ───────────────────────────────────────────────────────────

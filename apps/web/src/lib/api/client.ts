@@ -1,11 +1,13 @@
+import { CSRF_COOKIE, CSRF_HEADER } from '../auth/constants';
 import { createSeed, type MockDb } from '../mock/seed';
 
 /**
  * Prototype backend adapter.
  *
- * Every service function in lib/api goes through `backend()`. Today it returns an
- * in-memory store seeded on first use in the browser; when the NestJS API is ready,
- * replace the service bodies with `request()` calls and keep the function signatures,
+ * Modules not yet built on the NestJS API (patients, appointments, …) go through
+ * `backend()`, an in-memory store seeded on first use in the browser. Modules backed by
+ * the API (auth, center, staff) use `request()` below. When a module moves to the API,
+ * replace its service bodies with `request()` calls and keep the function signatures,
  * so screens and hooks don't change.
  */
 
@@ -32,25 +34,89 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status = 400,
+    /** Machine-readable reason from the API, e.g. LAST_ADMIN */
+    public readonly code?: string,
+    /** Field path → message, e.g. { 'owner.email': 'Already registered' } */
+    public readonly errors?: Record<string, string>,
   ) {
     super(message);
   }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+/** Same-origin path that next.config.ts rewrites to the NestJS API. */
+const API_BASE = '/api';
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-/** Real HTTP client for when endpoints exist. Not used by the prototype yet. */
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.message ?? res.statusText, res.status);
+function readCookie(name: string) {
+  const match = document.cookie.split('; ').find((c) => c.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : undefined;
+}
+
+let csrfRequest: Promise<void> | null = null;
+
+/** The API issues the CSRF cookie on demand; fetch it once before the first write. */
+async function csrfToken() {
+  let token = readCookie(CSRF_COOKIE);
+  if (!token) {
+    csrfRequest ??= fetch(`${API_BASE}/auth/csrf`, { credentials: 'same-origin' }).then(() => {
+      csrfRequest = null;
+    });
+    await csrfRequest;
+    token = readCookie(CSRF_COOKIE);
   }
-  return res.json() as Promise<T>;
+  return token ?? '';
+}
+
+/**
+ * Calls the Carezino API. The session lives in an HttpOnly cookie the browser sends on
+ * its own; state-changing requests also echo the CSRF cookie in a header. Errors are
+ * thrown as ApiError with the API's user-facing message.
+ */
+export async function request<T>(
+  path: string,
+  init: Omit<RequestInit, 'body'> & { body?: unknown } = {},
+): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase();
+  const headers = new Headers(init.headers);
+  if (init.body !== undefined) headers.set('Content-Type', 'application/json');
+  if (!SAFE_METHODS.has(method)) headers.set(CSRF_HEADER, await csrfToken());
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      method,
+      headers,
+      credentials: 'same-origin',
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+  } catch {
+    throw new ApiError('Can’t reach Carezino. Check your connection and try again.', 0);
+  }
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string | string[];
+      code?: string;
+      errors?: Record<string, string>;
+    };
+    const message = Array.isArray(body.message) ? body.message[0] : body.message;
+    throw new ApiError(
+      message ??
+        (res.status >= 500
+          ? 'Something went wrong on our side. Please try again.'
+          : res.statusText),
+      res.status,
+      body.code,
+      body.errors,
+    );
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export function isApiError(error: unknown, status?: number): error is ApiError {
+  return error instanceof ApiError && (status === undefined || error.status === status);
 }
 
 /** Deep-ish copy so callers can't mutate the store through returned objects. */

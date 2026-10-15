@@ -41,7 +41,7 @@ The root has no `test` script, though `turbo.json` defines a `test` task. Run te
 
 ```bash
 npm run test -w @carezino/api                          # unit tests (src/**/*.spec.ts)
-npm run test:e2e -w @carezino/api                      # e2e tests (test/*.e2e-spec.ts, supertest)
+npm run test:e2e -w @carezino/api                      # e2e tests (test/*.e2e-spec.ts, supertest; needs TEST_DATABASE_URL)
 npm run test:cov -w @carezino/api
 npm run test -w @carezino/api -- app.controller          # single test file (path pattern)
 npm run test -w @carezino/api -- -t "test name pattern"   # single test by name
@@ -49,9 +49,34 @@ npm run test -w @carezino/api -- -t "test name pattern"   # single test by name
 
 The API's `lint` script runs `eslint --fix`, so linting rewrites files.
 
+Database (Prisma 7, schema in `apps/api/prisma/schema.prisma`, migrations in `apps/api/prisma/migrations`):
+
+```bash
+npm run db:migrate -w @carezino/api   # create/apply a migration in development
+npm run db:deploy -w @carezino/api    # apply pending migrations (CI, production, test DB)
+```
+
+The e2e tests truncate every table, so they refuse to run without `TEST_DATABASE_URL`, a separate disposable database. Migrate it first with `DATABASE_URL=$TEST_DATABASE_URL npx prisma migrate deploy` (in `apps/api`).
+
+## Auth and tenancy (apps/api/src/auth, centers, staff)
+
+- **Sessions:** opaque random tokens in an HttpOnly `cz_session` cookie; only the SHA-256 is stored (`Session`). No JWTs. Passwords use Argon2id.
+- **Same origin:** the browser never calls the API directly. `next.config.ts` rewrites `/api/*` to `API_URL` (default `http://localhost:3001`; baked in at build time). `lib/api/client.ts` `request()` is the only HTTP client.
+- **CSRF:** global `CsrfGuard` requires header `x-csrf-token` to equal the `cz_csrf` cookie on every non-GET request, including login.
+- **Global guards** (in order): throttler → CSRF → `SessionGuard` (everything requires a session unless `@Public()`) → `PermissionsGuard` (`@RequirePermissions(...)`).
+- **Tenant isolation:** center-scoped handlers take `@Tenant() tenant`, whose `centerId` comes from the session's validated active membership, never from the request. Every center-owned query must filter by `tenant.centerId`; another center's record should look like a 404.
+- **Roles:** fixed (`CENTER_ADMIN`, `MANAGER`, `RECEPTIONIST`, `THERAPIST`), mapped to permissions in `apps/api/src/auth/permissions.ts`. The web reads granted permissions from `GET /auth/me`; `apps/web/src/lib/permissions.ts` only adds UI-only permissions for prototype modules not yet on the API. Add a module's permissions to the API map when it's built.
+- **Web gating:** on full page loads `src/proxy.ts` asks the API (`GET /auth/session`, 200 with `{ me: null }` when signed out) who the user is and redirects before rendering (sign-in, `/admin`, `/select-center`; rules in `lib/auth/session-api.ts`). The `(app)` and `(platform)` layouts re-check on the server inside `<Suspense>` (`lib/auth/server.ts`) and pass the user to `AuthGate`/`PlatformGate`, which provide `useSession()` and react to sign-out. Public screens live in the `(auth)` route group.
+- **Instant-navigation validation (dev):** layouts must always render `{children}`. Don't gate a segment behind client-side loading state or call `redirect()` during render for expected cases; redirect in `proxy.ts` or `next.config.ts` `redirects()` instead, or Next logs "Could not validate … instant navigation".
+- **Email:** `MailService` uses SMTP when `SMTP_HOST` is set. Without it nothing is sent and callers report `emailDelivered: false`; in development the message and link are printed to the API console.
+- **Super admin (platform admin):** `User.isPlatformAdmin` with a `username`, signs in at `/admin/login` (`POST /auth/admin/login`). The `/admin` area (`app/(platform)`) lists every center and registers new ones through `/platform/*` endpoints marked `@PlatformAdminOnly()`; these are cross-center and don't use `@Tenant()`. Public `/register` is off unless `PUBLIC_REGISTRATION_ENABLED=true`. Create or reset a super admin with `PLATFORM_ADMIN_USERNAME=… PLATFORM_ADMIN_PASSWORD=… npm run platform:create-admin -w @carezino/api [-- --reset-password]`; never hard-code credentials.
+- Sensitive admin actions are written to `AuditLog` via `AuditService.record(entry, tx)`. Never put credentials or tokens in its metadata.
+
 ## Gotchas
 
 - **Ports:** the web app (`next dev`) runs on 3000 and the API on `process.env.PORT ?? 3001` (`apps/api/src/main.ts`). Don't set a global `PORT` when running `npm run dev`, or both apps will try to use it.
 - **Next.js 16 differs from older versions** (see `apps/web/AGENTS.md`): APIs, conventions and file structure may not match your training data. Read the relevant guide in `apps/web/node_modules/next/dist/docs/` (or the hoisted `node_modules/next/dist/docs/`) before writing web code, and heed deprecation notices. `next dev` re-adds that AGENTS.md block automatically, so commit it rather than removing it.
 - `apps/web/next.config.ts` enables `cacheComponents` and `partialPrefetching`, and wires Tailwind into Turbopack through the `@tailwindcss/turbopack` loader for `*.css`. There is no PostCSS config.
+- **API env:** see `apps/api/.env.example` (registration toggle, cookie/session lifetimes, rate limits, SMTP).
+- **API tests and ESM:** `@nestjs/config` v12 is ESM-only and Prisma 7 loads its query compiler with dynamic `import()`. The Jest configs therefore transpile `@nestjs/config`, map `.js` import suffixes, and `test:e2e` runs with `NODE_OPTIONS=--experimental-vm-modules`.
 - **Prettier:** the root `.prettierrc` uses single quotes, trailing commas, a print width of 100 and semicolons. `apps/api/.prettierrc` overrides it for the API (single quotes, trailing commas, default print width of 80). The web app's generated files currently use double quotes, which doesn't match the root config.
