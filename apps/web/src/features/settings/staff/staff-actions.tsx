@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { CheckCircle2, CircleSlash, Clock, MailWarning } from 'lucide-react';
+import { Check, CheckCircle2, CircleSlash, Clock, Copy, MailWarning } from 'lucide-react';
 import { z } from 'zod';
 
 import { StatusBadge } from '@/components/domain/status-badges';
@@ -27,6 +27,7 @@ import {
   useInviteStaff,
   type InvitationResult,
 } from '@/lib/api/staff';
+import { formatDate } from '@/lib/format';
 import { showFormError } from '@/lib/forms';
 import { ROLES, roleDescriptions, roleLabels } from '@/lib/permissions';
 import type { MembershipStatus, Role, StaffInvitation, StaffMember } from '@/lib/types';
@@ -56,10 +57,26 @@ export function InvitationStatusBadge({ invitation }: { invitation: StaffInvitat
   );
 }
 
-/** Tells the admin honestly whether the invitation email went out. */
-export function announceInvitation(result: InvitationResult, verb: 'sent' | 'resent') {
+/** An invitation link for the admin to pass on, and whether that's because email failed. */
+export interface SharedInvitationLink {
+  invitation: StaffInvitation;
+  link: string;
+  emailFailed: boolean;
+}
+
+/**
+ * Tells the admin honestly whether the invitation email went out. When it didn't, the
+ * API returns the link instead, and `showLink` puts it in front of them to share.
+ */
+export function announceInvitation(
+  result: InvitationResult,
+  verb: 'sent' | 'resent',
+  showLink?: (shared: SharedInvitationLink) => void,
+) {
   if (result.emailDelivered) {
     toast.success(`Invitation ${verb} to ${result.invitation.email}`);
+  } else if (result.link && showLink) {
+    showLink({ invitation: result.invitation, link: result.link, emailFailed: true });
   } else {
     toast.warning('Invitation saved, but no email was sent', {
       description:
@@ -116,9 +133,12 @@ const inviteDefaults = {
 export function InviteStaffDialog({
   open,
   onOpenChange,
+  onShowLink,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Shows the link when no email could be sent */
+  onShowLink?: (shared: SharedInvitationLink) => void;
 }) {
   const invite = useInviteStaff();
   const form = useForm<InviteValues>({
@@ -136,8 +156,8 @@ export function InviteStaffDialog({
   const onSubmit = handleSubmit(async (values) => {
     try {
       const result = await invite.mutateAsync({ ...values, mobile: values.mobile || undefined });
-      announceInvitation(result, 'sent');
       onOpenChange(false);
+      announceInvitation(result, 'sent', onShowLink);
     } catch (error) {
       showFormError(error, setError, ['fullName', 'email', 'mobile', 'role']);
     }
@@ -149,8 +169,8 @@ export function InviteStaffDialog({
         <DialogHeader>
           <DialogTitle>Invite a staff member</DialogTitle>
           <DialogDescription>
-            They’ll get an email with a link to join your center and set their own password. The
-            link works for 7 days.
+            We’ll email them a link to join your center and set their own password. If the email
+            can’t be sent, you’ll get the link to share yourself. The link works for 7 days.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -310,4 +330,81 @@ export function useStaffDialogs() {
     </>
   );
   return { changeRole: setRoleTarget, changeStatus: setStatusTarget, dialogs };
+}
+
+/**
+ * Shows an invitation link with a copy button, for sharing by WhatsApp, SMS or in
+ * person. The link grants access to the center, so the copy says who it's for.
+ */
+export function InvitationLinkDialog({
+  shared,
+  onOpenChange,
+}: {
+  shared: SharedInvitationLink | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  // Remembers which link was copied, so a newly issued link starts uncopied.
+  const [copiedLink, setCopiedLink] = React.useState<string | null>(null);
+  const copied = Boolean(shared) && copiedLink === shared?.link;
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const copy = async () => {
+    if (!shared) return;
+    try {
+      await navigator.clipboard.writeText(shared.link);
+      setCopiedLink(shared.link);
+      toast.success('Invitation link copied');
+    } catch {
+      // Clipboard access can be blocked (e.g. outside HTTPS); let them copy by hand.
+      inputRef.current?.select();
+      toast.message('Press Ctrl+C (or ⌘C) to copy the selected link');
+    }
+  };
+
+  const invitation = shared?.invitation;
+  return (
+    <Dialog open={Boolean(shared)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Invitation link for {invitation?.fullName}</DialogTitle>
+          <DialogDescription>
+            {shared?.emailFailed
+              ? 'No email was sent, because email isn’t set up for Carezino yet. '
+              : ''}
+            Copy this link and send it to {invitation?.fullName} yourself, for example by WhatsApp
+            or SMS.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2">
+          <Input
+            ref={inputRef}
+            readOnly
+            value={shared?.link ?? ''}
+            aria-label="Invitation link"
+            onFocus={(e) => e.currentTarget.select()}
+            className="font-mono text-xs"
+          />
+          <Button type="button" onClick={() => void copy()} className="shrink-0">
+            {copied ? <Check /> : <Copy />}
+            {copied ? 'Copied' : 'Copy link'}
+          </Button>
+        </div>
+        {invitation && (
+          <ul className="list-disc space-y-1 pl-5 text-[13px] text-muted-foreground">
+            <li>
+              Anyone with this link can join as {roleLabels[invitation.role].toLowerCase()}, so send
+              it only to {invitation.fullName} ({invitation.email}).
+            </li>
+            <li>It works once and expires on {formatDate(invitation.expiresAt)}.</li>
+            <li>Getting a new link or resending the invitation stops this one working.</li>
+          </ul>
+        )}
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

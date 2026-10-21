@@ -60,6 +60,14 @@ export class RegisterCenterDto {
   @ValidateNested()
   @Type(() => OwnerDto)
   owner!: OwnerDto;
+
+  /**
+   * Start the center with the standard therapy types (OT, ABA, SLT) as editable
+   * records. Defaults to true; working hours and settings are always initialized.
+   */
+  @IsOptional()
+  @IsBoolean()
+  defaultTherapyTypes?: boolean;
 }
 
 export class LoginDto {

@@ -19,6 +19,8 @@ export interface SentMail {
 export class FakeMail {
   sent: SentMail[] = [];
   configured = true;
+  /** Set to false to act like a server without SMTP: invitations aren't delivered. */
+  delivers = true;
 
   sendPasswordReset(to: string, _name: string, link: string) {
     this.sent.push({ to, kind: 'reset', link });
@@ -26,6 +28,7 @@ export class FakeMail {
   }
 
   sendInvitation(to: string, opts: { link: string }) {
+    if (!this.delivers) return Promise.resolve(false);
     this.sent.push({ to, kind: 'invitation', link: opts.link });
     return Promise.resolve(true);
   }
@@ -55,7 +58,7 @@ export async function createTestApp() {
 
 export async function resetDatabase(prisma: PrismaService) {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE "AuditLog", "Invitation", "PasswordResetToken", "Session", "CenterMembership", "User", "Center" CASCADE',
+    'TRUNCATE "AuditLog", "Invitation", "PasswordResetToken", "Session", "CenterMembership", "User", "TherapyDurationOption", "TherapyType", "CenterWorkingHour", "CenterClosure", "CenterSchedulingSettings", "CenterGeneralSettings", "Center" CASCADE',
   );
 }
 
@@ -89,7 +92,11 @@ export class Browser {
     return this.agent.get(path).then((res) => this.capture(res));
   }
 
-  send(method: 'post' | 'patch' | 'delete', path: string, body?: object) {
+  send(
+    method: 'post' | 'put' | 'patch' | 'delete',
+    path: string,
+    body?: object,
+  ) {
     return this.agent[method](path)
       .set(CSRF_HEADER, this.csrf)
       .send(body ?? {})
@@ -100,8 +107,16 @@ export class Browser {
     return this.send('post', path, body);
   }
 
+  put(path: string, body?: object) {
+    return this.send('put', path, body);
+  }
+
   patch(path: string, body?: object) {
     return this.send('patch', path, body);
+  }
+
+  delete(path: string) {
+    return this.send('delete', path);
   }
 }
 

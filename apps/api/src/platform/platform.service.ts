@@ -146,6 +146,7 @@ export class PlatformService {
       ipAddress,
       via: 'platform_admin',
       actorUserId: auth.user.id,
+      defaultTherapyTypes: dto.defaultTherapyTypes,
     });
     return { center };
   }

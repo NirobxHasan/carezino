@@ -38,7 +38,11 @@ export function TimePicker({
   step?: number;
   placeholder?: string;
 }) {
-  const times = React.useMemo(() => buildTimes(min, max, step), [min, max, step]);
+  const times = React.useMemo(() => {
+    const options = buildTimes(min, max, step);
+    // A saved time off the step (e.g. 09:10) still shows rather than appearing blank.
+    return value && !options.includes(value) ? [...options, value].sort() : options;
+  }, [min, max, step, value]);
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger {...trigger}>

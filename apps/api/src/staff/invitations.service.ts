@@ -175,7 +175,23 @@ export class InvitationsService {
       invitation,
       token,
     );
-    return { invitation: toSummary(invitation), emailDelivered };
+    return this.result(invitation, token, emailDelivered);
+  }
+
+  /**
+   * When no email went out (SMTP not set up, or sending failed), the admin gets the link
+   * to pass on themselves. Otherwise the email is the only place the link appears.
+   */
+  private result(
+    invitation: InvitationRow,
+    token: string,
+    emailDelivered: boolean,
+  ) {
+    return {
+      invitation: toSummary(invitation),
+      emailDelivered,
+      ...(!emailDelivered && { link: this.link(token) }),
+    };
   }
 
   /** Open invitations (pending or expired, not accepted or revoked) for the active center. */
@@ -206,8 +222,16 @@ export class InvitationsService {
     return invitation;
   }
 
-  /** Issues a new link (the old one stops working) and a fresh expiry, then re-sends. */
-  async resend(tenant: TenantContext, id: string, ipAddress: string | null) {
+  /**
+   * Gives an open invitation a new link and a fresh expiry. Only the token's hash is
+   * stored, so an earlier link can't be shown again; it stops working instead.
+   */
+  private async reissue(
+    tenant: TenantContext,
+    id: string,
+    action: string,
+    ipAddress: string | null,
+  ) {
     await this.findOpen(tenant, id);
     const token = generateToken();
     const invitation = await this.prisma.$transaction(async (tx) => {
@@ -223,7 +247,7 @@ export class InvitationsService {
         {
           centerId: tenant.centerId,
           actorUserId: tenant.userId,
-          action: 'staff.invitation_resent',
+          action,
           entityType: 'Invitation',
           entityId: id,
           metadata: { email: updated.email },
@@ -233,12 +257,41 @@ export class InvitationsService {
       );
       return updated;
     });
+    return { invitation, token };
+  }
+
+  /** Issues a new link (the old one stops working) and a fresh expiry, then re-sends. */
+  async resend(tenant: TenantContext, id: string, ipAddress: string | null) {
+    const { invitation, token } = await this.reissue(
+      tenant,
+      id,
+      'staff.invitation_resent',
+      ipAddress,
+    );
     const emailDelivered = await this.deliver(
       tenant.centerId,
       invitation,
       token,
     );
-    return { invitation: toSummary(invitation), emailDelivered };
+    return this.result(invitation, token, emailDelivered);
+  }
+
+  /**
+   * A new link for the admin to share themselves (e.g. by WhatsApp), without emailing
+   * it. Any earlier link, including one already emailed, stops working.
+   */
+  async createLink(
+    tenant: TenantContext,
+    id: string,
+    ipAddress: string | null,
+  ) {
+    const { invitation, token } = await this.reissue(
+      tenant,
+      id,
+      'staff.invitation_link_created',
+      ipAddress,
+    );
+    return { invitation: toSummary(invitation), link: this.link(token) };
   }
 
   async revoke(tenant: TenantContext, id: string, ipAddress: string | null) {

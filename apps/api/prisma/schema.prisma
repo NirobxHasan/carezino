@@ -35,10 +35,15 @@ model Center {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  memberships CenterMembership[]
-  invitations Invitation[]
-  auditLogs   AuditLog[]
-  sessions    Session[]
+  memberships        CenterMembership[]
+  invitations        Invitation[]
+  auditLogs          AuditLog[]
+  sessions           Session[]
+  therapyTypes       TherapyType[]
+  workingHours       CenterWorkingHour[]
+  closures           CenterClosure[]
+  schedulingSettings CenterSchedulingSettings?
+  generalSettings    CenterGeneralSettings?
 }
 
 // ── Identity ────────────────────────────────────────────────────────────────
@@ -181,4 +186,166 @@ model AuditLog {
   actor  User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([centerId, createdAt])
+}
+
+// ── Therapy services ────────────────────────────────────────────────────────
+// Therapy types are plain per-center records, never hard-coded disciplines. Other
+// records must reference them by `id` (never by name or code) with onDelete: Restrict,
+// so a type in use can be deactivated but not deleted.
+
+model TherapyType {
+  id                     String   @id @default(uuid()) @db.Uuid
+  centerId               String   @db.Uuid
+  name                   String
+  /// Short code shown on calendars and receipts, e.g. OT. Stored upper-cased.
+  code                   String
+  description            String?
+  /// The default duration option; kept in step with it by TherapyTypesService
+  defaultDurationMinutes Int
+  /// Hex colour, e.g. #0d9488
+  color                  String?
+  /// Inactive types can't be chosen for new records but stay on existing ones
+  isActive               Boolean  @default(true)
+  displayOrder           Int      @default(0)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  center          Center                  @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  durationOptions TherapyDurationOption[]
+
+  @@unique([centerId, code])
+  @@unique([centerId, name])
+  @@index([centerId, isActive, displayOrder])
+}
+
+/// Session lengths a therapy type can be booked for. The option whose duration equals
+/// TherapyType.defaultDurationMinutes is the default, so there is exactly one.
+/// Bookings store their own duration, so editing an option never changes them.
+model TherapyDurationOption {
+  id              String   @id @default(uuid()) @db.Uuid
+  therapyTypeId   String   @db.Uuid
+  durationMinutes Int
+  /// Optional name, e.g. "Extended session"
+  label           String?
+  isActive        Boolean  @default(true)
+  displayOrder    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  therapyType TherapyType @relation(fields: [therapyTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([therapyTypeId, durationMinutes])
+}
+
+// ── Center schedule ─────────────────────────────────────────────────────────
+// Times are minutes since midnight in the center's time zone (Center.timezone).
+
+/// One opening interval on a weekday. A day with no rows is closed.
+model CenterWorkingHour {
+  id           String   @id @default(uuid()) @db.Uuid
+  centerId     String   @db.Uuid
+  /// 0 = Sunday … 6 = Saturday
+  dayOfWeek    Int
+  startMinutes Int
+  endMinutes   Int
+  createdAt    DateTime @default(now())
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+
+  @@unique([centerId, dayOfWeek, startMinutes])
+}
+
+/// A holiday or other closure. Bookings aren't changed here; scheduling reads these.
+model CenterClosure {
+  id           String   @id @default(uuid()) @db.Uuid
+  centerId     String   @db.Uuid
+  title        String
+  /// Inclusive dates in the center's time zone
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  reason       String?
+  allDay       Boolean  @default(true)
+  /// Only for single-day, part-day closures (allDay = false)
+  startMinutes Int?
+  endMinutes   Int?
+  /// Inactive closures are kept for reference but ignored by scheduling
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+
+  @@index([centerId, endDate])
+}
+
+// ── Center settings ─────────────────────────────────────────────────────────
+// One row per center, created on first use. Defaults live here and nowhere else.
+
+/// Booking policies. The booking engine applies them; nothing here books anything.
+model CenterSchedulingSettings {
+  centerId                    String   @id @db.Uuid
+  slotIntervalMinutes         Int      @default(15)
+  bookingBufferMinutes        Int      @default(0)
+  /// Whether a booking may use a length other than the therapy type's duration options
+  allowCustomDuration         Boolean  @default(false)
+  allowBookingOnClosedDays    Boolean  @default(false)
+  advanceBookingLimitDays     Int      @default(60)
+  minimumBookingNoticeMinutes Int      @default(0)
+  /// Policy only: scheduling must still detect collisions and apply this rule
+  allowDoubleBooking          Boolean  @default(false)
+  allowPastDateBooking        Boolean  @default(false)
+  cancellationCutoffMinutes   Int      @default(0)
+  updatedAt                   DateTime @updatedAt
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+}
+
+/// How a new booking's duration is preselected.
+enum DefaultDurationBehavior {
+  /// The therapy type's default duration
+  THERAPY_TYPE_DEFAULT
+  /// The patient's last booked duration for that therapy, else the therapy default
+  PREVIOUS_SESSION
+  /// Nothing preselected; staff choose every time
+  ASK_EACH_TIME
+}
+
+/// Patient lifecycle. The patients module will reuse this enum.
+enum PatientStatus {
+  ACTIVE
+  WAITLIST
+  ON_HOLD
+  DISCHARGED
+}
+
+enum DateDisplayFormat {
+  /// 14 Oct 2026
+  D_MMM_YYYY
+  /// 14/10/2026
+  DD_MM_YYYY
+  /// 10/14/2026
+  MM_DD_YYYY
+  /// 2026-10-14
+  YYYY_MM_DD
+}
+
+enum TimeDisplayFormat {
+  H12
+  H24
+}
+
+model CenterGeneralSettings {
+  centerId                String                  @id @db.Uuid
+  defaultDurationBehavior DefaultDurationBehavior @default(THERAPY_TYPE_DEFAULT)
+  autoGeneratePatientCode Boolean                 @default(true)
+  /// e.g. "P-" gives P-0001. Null: codes are numbers only.
+  patientCodePrefix       String?
+  defaultPatientStatus    PatientStatus           @default(ACTIVE)
+  dateFormat              DateDisplayFormat       @default(D_MMM_YYYY)
+  timeFormat              TimeDisplayFormat       @default(H12)
+  /// First day of the week on calendars: 0 = Sunday, 1 = Monday, 6 = Saturday
+  weekStartsOn            Int                     @default(6)
+  updatedAt               DateTime                @updatedAt
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
 }

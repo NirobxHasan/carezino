@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Ellipsis,
   Eye,
+  Link2,
   MailPlus,
   RefreshCw,
   ShieldCheck,
@@ -40,6 +41,7 @@ import {
 import { toast } from '@/components/ui/sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  useCreateInvitationLink,
   useInvitations,
   useResendInvitation,
   useRevokeInvitation,
@@ -52,11 +54,13 @@ import { ROLES, roleLabels } from '@/lib/permissions';
 import { useSession } from '@/lib/session';
 import type { StaffInvitation, StaffMember } from '@/lib/types';
 import {
+  InvitationLinkDialog,
   InvitationStatusBadge,
   InviteStaffDialog,
   StaffStatusBadge,
   announceInvitation,
   useStaffDialogs,
+  type SharedInvitationLink,
 } from './staff-actions';
 
 const PAGE_SIZE = 10;
@@ -299,9 +303,16 @@ function StaffTable({ onInvite }: { onInvite?: () => void }) {
   );
 }
 
-function InvitationsTable({ canManage }: { canManage: boolean }) {
+function InvitationsTable({
+  canManage,
+  onShowLink,
+}: {
+  canManage: boolean;
+  onShowLink: (shared: SharedInvitationLink) => void;
+}) {
   const { data, isPending, error, refetch } = useInvitations();
   const resend = useResendInvitation();
+  const createLink = useCreateInvitationLink();
   const revoke = useRevokeInvitation();
   const [revokeTarget, setRevokeTarget] = React.useState<StaffInvitation | null>(null);
 
@@ -352,10 +363,21 @@ function InvitationsTable({ canManage }: { canManage: boolean }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem
+                  disabled={createLink.isPending}
+                  onSelect={() =>
+                    createLink.mutate(row.original.id, {
+                      onSuccess: (result) => onShowLink({ ...result, emailFailed: false }),
+                      onError: (e) => toast.error(e.message),
+                    })
+                  }
+                >
+                  <Link2 /> Get invitation link
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   disabled={resend.isPending}
                   onSelect={() =>
                     resend.mutate(row.original.id, {
-                      onSuccess: (result) => announceInvitation(result, 'resent'),
+                      onSuccess: (result) => announceInvitation(result, 'resent', onShowLink),
                       onError: (e) => toast.error(e.message),
                     })
                   }
@@ -371,7 +393,7 @@ function InvitationsTable({ canManage }: { canManage: boolean }) {
           ) : null,
       },
     ],
-    [canManage, resend],
+    [canManage, resend, createLink, onShowLink],
   );
 
   return (
@@ -419,6 +441,7 @@ export function StaffScreen() {
   const { can } = useSession();
   const canInvite = can('staff.create') && can('staff.assign_role');
   const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [sharedLink, setSharedLink] = React.useState<SharedInvitationLink | null>(null);
   const invitations = useInvitations(can('staff.read'));
   const pending = invitations.data?.length ?? 0;
 
@@ -451,10 +474,17 @@ export function StaffScreen() {
           <StaffTable onInvite={canInvite ? () => setInviteOpen(true) : undefined} />
         </TabsContent>
         <TabsContent value="invitations">
-          <InvitationsTable canManage={can('staff.create')} />
+          <InvitationsTable canManage={can('staff.create')} onShowLink={setSharedLink} />
         </TabsContent>
       </Tabs>
-      {canInvite && <InviteStaffDialog open={inviteOpen} onOpenChange={setInviteOpen} />}
+      {canInvite && (
+        <InviteStaffDialog
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          onShowLink={setSharedLink}
+        />
+      )}
+      <InvitationLinkDialog shared={sharedLink} onOpenChange={(o) => !o && setSharedLink(null)} />
     </RequirePermission>
   );
 }

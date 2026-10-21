@@ -42,6 +42,14 @@ export interface InvitationResult {
   invitation: StaffInvitation;
   /** False when no email provider is configured or sending failed */
   emailDelivered: boolean;
+  /** Only when no email was sent, so the admin can pass the link on themselves */
+  link?: string;
+}
+
+/** A freshly issued invitation link; earlier links for the invitation stop working. */
+export interface InvitationLink {
+  invitation: StaffInvitation;
+  link: string;
 }
 
 export type CenterUpdate = Partial<
@@ -83,6 +91,10 @@ export const staffApi = {
     request<InvitationResult>('/staff/invitations', { method: 'POST', body: input }),
   resend: (id: string) =>
     request<InvitationResult>(`/staff/invitations/${encodeURIComponent(id)}/resend`, {
+      method: 'POST',
+    }),
+  createLink: (id: string) =>
+    request<InvitationLink>(`/staff/invitations/${encodeURIComponent(id)}/link`, {
       method: 'POST',
     }),
   revoke: (id: string) =>
@@ -154,6 +166,10 @@ export function useInviteStaff() {
 
 export function useResendInvitation() {
   return useStaffMutation(staffApi.resend);
+}
+
+export function useCreateInvitationLink() {
+  return useStaffMutation(staffApi.createLink);
 }
 
 export function useRevokeInvitation() {

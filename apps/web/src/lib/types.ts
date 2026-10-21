@@ -165,7 +165,107 @@ export interface InvitationPreview {
   accountExists: boolean;
 }
 
-// ── Configuration ───────────────────────────────────────────────────────────
+// ── Center configuration (served by the API) ────────────────────────────────
+
+/** A session length a therapy type can be booked for. */
+export interface TherapyDurationOption {
+  id: ID;
+  durationMinutes: number;
+  label: string | null;
+  isActive: boolean;
+  /** Exactly one per therapy type: the one matching its default duration */
+  isDefault: boolean;
+  displayOrder: number;
+}
+
+/** A therapy service the center offers, as GET /therapy-types returns it. */
+export interface CenterTherapyType {
+  id: ID;
+  name: string;
+  /** Upper-case short code, e.g. OT */
+  code: string;
+  description: string | null;
+  defaultDurationMinutes: number;
+  /** Hex colour, e.g. #0d9488 */
+  color: string | null;
+  isActive: boolean;
+  displayOrder: number;
+  durationOptions: TherapyDurationOption[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+/** "HH:mm", 24-hour, in the center's time zone */
+export type ClockTime = string;
+
+export interface TimeInterval {
+  start: ClockTime;
+  end: ClockTime;
+}
+
+export interface WorkingDay {
+  /** 0 = Sunday … 6 = Saturday */
+  dayOfWeek: number;
+  isOpen: boolean;
+  intervals: TimeInterval[];
+}
+
+/** GET /settings/working-hours: all seven days, Sunday first */
+export interface WorkingWeek {
+  timezone: string;
+  days: WorkingDay[];
+}
+
+export interface CenterClosure {
+  id: ID;
+  title: string;
+  startDate: ISODate;
+  endDate: ISODate;
+  reason: string | null;
+  allDay: boolean;
+  /** Set for part-day closures only */
+  startTime: ClockTime | null;
+  endTime: ClockTime | null;
+  isActive: boolean;
+  days: number;
+  state: 'upcoming' | 'ongoing' | 'past';
+  /** Only closures that never took effect can be deleted */
+  canDelete: boolean;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export interface SchedulingSettings {
+  slotIntervalMinutes: number;
+  bookingBufferMinutes: number;
+  allowCustomDuration: boolean;
+  allowBookingOnClosedDays: boolean;
+  advanceBookingLimitDays: number;
+  minimumBookingNoticeMinutes: number;
+  allowDoubleBooking: boolean;
+  allowPastDateBooking: boolean;
+  cancellationCutoffMinutes: number;
+  updatedAt: ISODateTime;
+}
+
+export type DefaultDurationBehavior = 'THERAPY_TYPE_DEFAULT' | 'PREVIOUS_SESSION' | 'ASK_EACH_TIME';
+export type DateDisplayFormat = 'D_MMM_YYYY' | 'DD_MM_YYYY' | 'MM_DD_YYYY' | 'YYYY_MM_DD';
+export type TimeDisplayFormat = 'H12' | 'H24';
+
+export interface GeneralSettings {
+  defaultDurationBehavior: DefaultDurationBehavior;
+  autoGeneratePatientCode: boolean;
+  patientCodePrefix: string | null;
+  /** Status new patients start with */
+  defaultPatientStatus: 'ACTIVE' | 'WAITLIST';
+  dateFormat: DateDisplayFormat;
+  timeFormat: TimeDisplayFormat;
+  /** 0 = Sunday, 1 = Monday, 6 = Saturday */
+  weekStartsOn: number;
+  updatedAt: ISODateTime;
+}
+
+// ── Configuration (prototype) ───────────────────────────────────────────────
 
 /** Visual accent for a therapy type; keeps colour decisions out of feature code. */
 export type DisciplineAccent = 'ot' | 'aba' | 'slt' | 'other';

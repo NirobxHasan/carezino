@@ -1,5 +1,9 @@
 import { Transform } from 'class-transformer';
-import { ValidateBy, type ValidationOptions } from 'class-validator';
+import {
+  ValidateBy,
+  ValidateIf,
+  type ValidationOptions,
+} from 'class-validator';
 
 import { normalizeEmail, normalizeMobile, normalizePhone } from './identifiers';
 
@@ -10,6 +14,13 @@ export const Trim = () =>
     const trimmed = value.trim();
     return trimmed === '' ? undefined : trimmed;
   });
+
+/**
+ * For PATCH fields that are optional but can't be cleared: unlike IsOptional, which
+ * skips validation for null too, this only skips absent fields, so null is rejected.
+ */
+export const IfPresent = () =>
+  ValidateIf((_: unknown, value: unknown) => value !== undefined);
 
 /** Like Trim, but an empty string becomes null so PATCH requests can clear a field. */
 export const TrimOrNull = () =>

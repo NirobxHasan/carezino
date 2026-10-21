@@ -55,7 +55,12 @@ export function useConfig() {
   return useQuery({ queryKey: keys.config, queryFn: getConfig, staleTime: Infinity });
 }
 
-/** Therapy types by id, plus active ones in display order. */
+/**
+ * Prototype therapy types by id, plus active ones in display order. Their IDs (tt_ot…)
+ * are what the mock patients and appointments refer to. The real, per-center therapy
+ * types are served by the API (lib/api/therapy-types.ts); switch to those when these
+ * prototype modules move to the API.
+ */
 export function useTherapyTypes() {
   const { data, isLoading } = useConfig();
   const derived = useMemo(() => {

@@ -8,11 +8,13 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard, PermissionsGuard, SessionGuard } from './auth/guards';
 import { throttlerOptions } from './auth/throttle';
+import { CenterSettingsModule } from './center-settings/center-settings.module';
 import { CentersModule } from './centers/centers.module';
 import { CommonModule } from './common/common.module';
 import { PlatformModule } from './platform/platform.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StaffModule } from './staff/staff.module';
+import { TherapyTypesModule } from './therapy-types/therapy-types.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { StaffModule } from './staff/staff.module';
     StaffModule,
     CentersModule,
     PlatformModule,
+    TherapyTypesModule,
+    CenterSettingsModule,
   ],
   controllers: [AppController],
   providers: [

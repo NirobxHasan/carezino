@@ -14,6 +14,12 @@ export const API_PERMISSIONS = [
   'staff.assign_role',
   'profile.read',
   'profile.update',
+  'therapy_types.read',
+  'therapy_types.create',
+  'therapy_types.update',
+  'therapy_types.delete',
+  'center_settings.read',
+  'center_settings.update',
 ] as const;
 
 export type ApiPermission = (typeof API_PERMISSIONS)[number];

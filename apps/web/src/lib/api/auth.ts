@@ -38,6 +38,8 @@ export interface RegisterCenterInput {
     password: string;
     confirmPassword: string;
   };
+  /** Start with the standard therapy types (OT, ABA, SLT). Defaults to true. */
+  defaultTherapyTypes?: boolean;
 }
 
 export interface NewPasswordInput {

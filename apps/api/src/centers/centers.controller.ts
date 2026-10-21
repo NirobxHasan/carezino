@@ -66,7 +66,11 @@ export class RegistrationController {
     const { center, userId } = await this.centers.register(
       dto.center,
       dto.owner,
-      { ipAddress: requestMeta(req).ipAddress, via: 'public_registration' },
+      {
+        ipAddress: requestMeta(req).ipAddress,
+        via: 'public_registration',
+        defaultTherapyTypes: dto.defaultTherapyTypes,
+      },
     );
     await this.auth.startSession(req, res, userId, {
       remember: false,

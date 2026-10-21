@@ -70,6 +70,18 @@ export class StaffInvitationsController {
     return this.invitations.resend(tenant, id, requestMeta(req).ipAddress);
   }
 
+  /** Issues a new link to share directly; the previous link stops working. */
+  @Post(':id/link')
+  @HttpCode(200)
+  @RequirePermissions('staff.create')
+  createLink(
+    @Tenant() tenant: TenantContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+  ) {
+    return this.invitations.createLink(tenant, id, requestMeta(req).ipAddress);
+  }
+
   @Post(':id/revoke')
   @HttpCode(204)
   @RequirePermissions('staff.create')

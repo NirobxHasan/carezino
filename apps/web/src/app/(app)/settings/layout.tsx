@@ -8,7 +8,7 @@ export default function SettingsLayout({ children }: LayoutProps<'/settings'>) {
     <div className="animate-in">
       <PageHeader
         title="Settings"
-        description="Your center’s profile and the team who can use Carezino."
+        description="Your center’s profile, services, opening hours, booking rules and team."
       />
       <Suspense fallback={<div className="mb-6 h-10 border-b border-border" />}>
         <SettingsTabs />

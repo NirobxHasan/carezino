@@ -7,6 +7,8 @@ import {
   parseISO,
 } from 'date-fns';
 
+import type { DateDisplayFormat, TimeDisplayFormat } from './types';
+
 /** Bangladesh uses lakh/crore grouping (1,25,000), which the en-IN locale gives us. */
 const takaFormatter = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
 const numberFormatter = new Intl.NumberFormat('en-IN');
@@ -81,4 +83,24 @@ export function formatPhone(phone: string) {
     return `${digits.slice(0, 5)}-${digits.slice(5)}`;
   }
   return phone;
+}
+
+const DATE_PATTERNS: Record<DateDisplayFormat, string> = {
+  D_MMM_YYYY: 'd MMM yyyy',
+  DD_MM_YYYY: 'dd/MM/yyyy',
+  MM_DD_YYYY: 'MM/dd/yyyy',
+  YYYY_MM_DD: 'yyyy-MM-dd',
+};
+
+/** A date in the center's chosen format (General settings). */
+export function formatCenterDate(
+  value: string | Date,
+  dateFormat: DateDisplayFormat = 'D_MMM_YYYY',
+) {
+  return format(toDate(value), DATE_PATTERNS[dateFormat]);
+}
+
+/** "HH:mm" in the center's 12- or 24-hour preference. */
+export function formatCenterClock(hhmm: string, timeFormat: TimeDisplayFormat = 'H12') {
+  return timeFormat === 'H24' ? hhmm : formatClock(hhmm);
 }

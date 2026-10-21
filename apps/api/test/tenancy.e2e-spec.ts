@@ -393,6 +393,76 @@ describe('Tenancy, RBAC and staff (e2e)', () => {
       expect(me.body.activeCenter.role).toBe('RECEPTIONIST');
     });
 
+    it('hands the admin a shareable link when no email is sent', async () => {
+      const { browser: admin } = await registerCenter(app);
+      mail.delivers = false;
+      try {
+        const invite = await admin.post('/staff/invitations', {
+          fullName: 'Nusrat Jahan',
+          email: 'nusrat@example.com',
+          role: 'THERAPIST',
+        });
+        expect(invite.status).toBe(201);
+        expect(invite.body.emailDelivered).toBe(false);
+        const firstLink = new URL(invite.body.link as string);
+        expect(firstLink.origin + firstLink.pathname).toBe(
+          'http://web.test/invite',
+        );
+        const firstToken = firstLink.searchParams.get('token')!;
+        const invitee = await new Browser(app).init();
+        expect(
+          (await invitee.post('/invitations/preview', { token: firstToken }))
+            .body,
+        ).toMatchObject({ valid: true, email: 'nusrat@example.com' });
+
+        // Resending without email also returns the new link.
+        const id = invite.body.invitation.id as string;
+        const resent = await admin.post(`/staff/invitations/${id}/resend`);
+        expect(resent.body.emailDelivered).toBe(false);
+        expect(resent.body.link).toBeDefined();
+      } finally {
+        mail.delivers = true;
+      }
+    });
+
+    it('issues a fresh invitation link from the list, retiring the old one', async () => {
+      const { browser: admin } = await registerCenter(app);
+      const invite = await admin.post('/staff/invitations', {
+        fullName: 'Tanvir Ahmed',
+        email: 'tanvir@example.com',
+        role: 'RECEPTIONIST',
+      });
+      // Emailed, so the response itself carries no link.
+      expect(invite.body.link).toBeUndefined();
+      const id = invite.body.invitation.id as string;
+      const emailed = mail.lastToken('tanvir@example.com', 'invitation');
+
+      const res = await admin.post(`/staff/invitations/${id}/link`);
+      expect(res.status).toBe(200);
+      expect(res.body.invitation.id).toBe(id);
+      const token = new URL(res.body.link as string).searchParams.get('token');
+      const invitee = await new Browser(app).init();
+      expect(
+        (await invitee.post('/invitations/preview', { token })).body,
+      ).toMatchObject({ valid: true });
+      expect(
+        (await invitee.post('/invitations/preview', { token: emailed })).body,
+      ).toMatchObject({ valid: false });
+
+      // Only people who can invite get links, and only for their own center.
+      const manager = await addStaff(app, admin, mail, {
+        email: 'manager@example.com',
+        role: 'MANAGER',
+      });
+      expect(
+        (await manager.browser.post(`/staff/invitations/${id}/link`)).status,
+      ).toBe(403);
+      const other = await registerCenter(app);
+      expect(
+        (await other.browser.post(`/staff/invitations/${id}/link`)).status,
+      ).toBe(404);
+    });
+
     it('rejects duplicate, revoked and expired invitations', async () => {
       const { browser: admin } = await registerCenter(app);
       const body = {

@@ -9,7 +9,12 @@ import { cn } from '@/lib/utils';
 
 const TABS: { href: string; label: string; permission: Permission }[] = [
   { href: '/settings/center', label: 'Center profile', permission: 'center.read' },
-  { href: '/settings/staff', label: 'Staff', permission: 'staff.read' },
+  { href: '/settings/therapy-types', label: 'Therapy types', permission: 'therapy_types.read' },
+  { href: '/settings/working-hours', label: 'Working hours', permission: 'center_settings.read' },
+  { href: '/settings/holidays', label: 'Holidays & closures', permission: 'center_settings.read' },
+  { href: '/settings/scheduling', label: 'Scheduling', permission: 'center_settings.read' },
+  { href: '/settings/general', label: 'General', permission: 'center_settings.read' },
+  { href: '/settings/staff', label: 'Staff & permissions', permission: 'staff.read' },
 ];
 
 /** Link tabs for the settings area, matching the underline Tabs style. */

@@ -79,7 +79,8 @@ export const settingsNav: NavItem = {
   title: 'Settings',
   href: '/settings',
   icon: Settings,
-  // Center profile and staff live here; managers see them read-only.
+  // Center profile, services, hours, policies and staff live here; managers see them
+  // read-only. Other roles read the same configuration through the screens that use it.
   permission: 'staff.read',
 };
 
@@ -97,7 +98,12 @@ export const segmentLabels: Record<string, string> = {
   reports: 'Reports',
   settings: 'Settings',
   center: 'Center profile',
-  staff: 'Staff',
+  'therapy-types': 'Therapy types',
+  'working-hours': 'Working hours',
+  holidays: 'Holidays & closures',
+  scheduling: 'Scheduling',
+  general: 'General',
+  staff: 'Staff & permissions',
   profile: 'My profile',
   'design-system': 'Design system',
   new: 'New',

@@ -3,6 +3,7 @@ import { randomInt } from 'node:crypto';
 
 import { AuditService } from '../audit/audit.service';
 import type { TenantContext } from '../auth/auth-context';
+import { initializeCenterDefaults } from '../center-settings/defaults';
 import { PasswordService } from '../auth/password.service';
 import { apiError } from '../common/errors';
 import { Prisma } from '../generated/prisma/client';
@@ -113,8 +114,8 @@ export class CentersService {
   }
 
   /**
-   * Creates the center, its owner account and the owner's CENTER_ADMIN membership in one
-   * transaction, so a failure leaves nothing behind.
+   * Creates the center, its owner account, the owner's CENTER_ADMIN membership and the
+   * center's starting configuration in one transaction, so a failure leaves nothing behind.
    */
   async register(
     center: CenterDetailsDto,
@@ -124,6 +125,8 @@ export class CentersService {
       via: 'public_registration' | 'platform_admin';
       /** Who performed it; defaults to the new owner for public signup. */
       actorUserId?: string;
+      /** Seed the standard therapy types (default true) */
+      defaultTherapyTypes?: boolean;
     },
   ) {
     const passwordHash = await this.passwords.hash(owner.password);
@@ -158,6 +161,9 @@ export class CentersService {
             role: Role.CENTER_ADMIN,
             status: MembershipStatus.ACTIVE,
           },
+        });
+        await initializeCenterDefaults(tx, created.id, {
+          therapyTypes: meta.defaultTherapyTypes ?? true,
         });
         await this.audit.record(
           {

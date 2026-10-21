@@ -3,7 +3,7 @@
 import type * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
@@ -12,6 +12,7 @@ import { InlineLoader } from '@/components/feedback/states';
 import { Field, FormSection } from '@/components/forms/field';
 import { PasswordInput } from '@/components/forms/password-input';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useRegisterCenter, useRegistrationStatus } from '@/lib/api/auth';
@@ -47,6 +48,8 @@ const schema = z
       password: newPassword,
       confirmPassword: z.string().min(1, 'Confirm your password'),
     }),
+    /** Start with OT, ABA and SLT as editable therapy types */
+    defaultTherapyTypes: z.boolean(),
   })
   .refine((v) => v.owner.password === v.owner.confirmPassword, {
     message: 'Passwords don’t match',
@@ -85,6 +88,7 @@ const defaults: Values = {
     ...DEFAULT_CENTER_SETTINGS,
   },
   owner: { fullName: '', email: '', mobile: '', password: '', confirmPassword: '' },
+  defaultTherapyTypes: true,
 };
 
 /**
@@ -206,6 +210,34 @@ export function CenterRegistrationForm({
           <PasswordInput autoComplete="new-password" {...register('owner.confirmPassword')} />
         </Field>
       </FormSection>
+
+      {!self && (
+        <FormSection
+          title="Starting setup"
+          description="Working hours (Saturday to Thursday, 9 am to 6 pm) and booking settings are always added. The center can change everything later."
+        >
+          <Controller
+            control={control}
+            name="defaultTherapyTypes"
+            render={({ field }) => (
+              <label className="flex items-start gap-3 sm:col-span-2">
+                <Checkbox
+                  checked={field.value}
+                  onCheckedChange={(v) => field.onChange(v === true)}
+                  className="mt-0.5"
+                />
+                <span className="grid gap-0.5">
+                  <span className="text-sm font-medium">Add standard therapy types</span>
+                  <span className="text-xs text-muted-foreground">
+                    Occupational Therapy (OT), Applied Behavior Analysis (ABA) and Speech &amp;
+                    Language Therapy (SLT), as editable records.
+                  </span>
+                </span>
+              </label>
+            )}
+          />
+        </FormSection>
+      )}
 
       <div className="flex flex-col-reverse items-stretch gap-3 pt-6 sm:flex-row sm:justify-end">
         {footer}
