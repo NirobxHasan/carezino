@@ -16,7 +16,7 @@ import type {
 import { backend, clone, latency, uid } from './client';
 import { keys } from './keys';
 import { patientRef, therapistRef, type PatientRef, type TherapistRef } from './refs';
-import type { AppointmentWithRefs } from './appointments';
+import type { AppointmentWithRefs } from './prototype-appointments';
 
 // ── Assessments ─────────────────────────────────────────────────────────────
 

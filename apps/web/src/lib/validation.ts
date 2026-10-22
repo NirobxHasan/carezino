@@ -63,3 +63,18 @@ export const optionalUrl = z
     (v) => v === '' || /^(https?:\/\/)?[^\s/$.?#].[^\s]*\.[^\s]{2,}$/i.test(v),
     'Enter a valid website address',
   );
+
+/**
+ * Mobile from home or abroad, as the API accepts: a BD mobile (01…, 8801…, +8801…) or an
+ * international number written with + and the country code.
+ */
+export const anyMobile = z
+  .string()
+  .trim()
+  .min(1, 'Mobile number is required')
+  .refine((v) => {
+    const cleaned = v.replace(/[\s\-().]/g, '');
+    const bd = cleaned.replace(/^\+?88/, '');
+    if (/^01[3-9]\d{8}$/.test(bd)) return true;
+    return !/^\+?88/.test(cleaned) && /^\+[1-9]\d{6,14}$/.test(cleaned.replace(/^00/, '+'));
+  }, 'Enter a mobile number, e.g. 01712-345678, or +44… for numbers abroad');

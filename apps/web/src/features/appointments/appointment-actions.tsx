@@ -2,21 +2,19 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { isToday, parseISO } from 'date-fns';
-import {
-  Ban,
-  CalendarClock,
-  CheckCircle2,
-  Ellipsis,
-  FilePen,
-  LogIn,
-  UserRound,
-  UserX,
-} from 'lucide-react';
+import { Ban, CalendarClock, CheckCircle2, CircleCheck, Ellipsis, Eye, UserX } from 'lucide-react';
 
 import { ConfirmDialog } from '@/components/feedback/confirm-dialog';
 import { Field } from '@/components/forms/field';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { RadioCard, RadioGroup } from '@/components/ui/radio-group';
 import {
   Select,
   SelectContent,
@@ -32,198 +31,303 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/components/ui/sonner';
-import { useUpdateAppointmentStatus, type AppointmentWithRefs } from '@/lib/api/appointments';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  useCancelAppointment,
+  useCancelSeries,
+  useSetAppointmentStatus,
+  type StatusChange,
+} from '@/lib/api/appointments';
+import { useSchedulingSettings } from '@/lib/api/settings';
 import { useSession } from '@/lib/session';
-import type { AppointmentStatus } from '@/lib/types';
+import { formatMinutes } from '@/lib/settings-limits';
+import type { AppointmentItem, CancellationReason } from '@/lib/types';
+import { CANCELLATION_REASONS, appointmentLinks, useCenterFormat } from './appointment-display';
 import { RescheduleDialog } from './reschedule-dialog';
 
-const cancelReasons = [
-  'Child unwell',
-  'Guardian requested',
-  'Therapist unavailable',
-  'Family travelling',
-  'Other',
-];
+export type AppointmentAction = 'confirm' | 'complete' | 'noShow' | 'cancel' | 'reschedule';
 
-const statusToast: Partial<Record<AppointmentStatus, string>> = {
-  checked_in: 'Checked in',
-  completed: 'Marked as completed',
-  no_show: 'Marked as no-show',
-  cancelled: 'Appointment cancelled',
+const STATUS_STEPS: Record<
+  'confirm' | 'complete' | 'noShow',
+  { status: StatusChange; title: string; description: string; label: string; done: string }
+> = {
+  confirm: {
+    status: 'CONFIRMED',
+    title: 'Confirm this appointment?',
+    description: 'Mark that the patient or guardian has confirmed they’re coming.',
+    label: 'Confirm',
+    done: 'Appointment confirmed',
+  },
+  complete: {
+    status: 'COMPLETED',
+    title: 'Mark as completed?',
+    description:
+      'Records that the session took place. Session notes, packages and billing are handled separately.',
+    label: 'Mark completed',
+    done: 'Marked as completed',
+  },
+  noShow: {
+    status: 'NO_SHOW',
+    title: 'Mark as no-show?',
+    description:
+      'Records that the patient didn’t come. The time is released; the appointment and its history are kept.',
+    label: 'Mark no-show',
+    done: 'Marked as no-show',
+  },
 };
 
 /**
- * The one place appointment status changes happen, so the rules (who can do what, when)
- * stay consistent between the dashboard, calendar and patient profile.
+ * Every appointment action with its dialog, in one place so the list, calendar, details
+ * and profiles behave the same. What's offered follows `appointment.actions`, which the
+ * API works out from the status, the time and the user's permissions.
  */
-export function useAppointmentActions(appointment: AppointmentWithRefs) {
-  const { can } = useSession();
-  const update = useUpdateAppointmentStatus();
-  const start = parseISO(appointment.start);
-  const s = appointment.status;
-  const manage = can('appointments.manage');
-  const write = can('clinical.write');
+export function useAppointmentDialogs() {
+  const [state, setState] = React.useState<{
+    action: AppointmentAction;
+    appointment: AppointmentItem;
+  } | null>(null);
+  const setStatus = useSetAppointmentStatus();
+  const close = () => setState(null);
+  const step =
+    state && state.action !== 'cancel' && state.action !== 'reschedule'
+      ? STATUS_STEPS[state.action]
+      : null;
 
-  const setStatus = async (status: AppointmentStatus, reason?: string) => {
-    try {
-      await update.mutateAsync({ id: appointment.id, status, reason });
-      toast.success(statusToast[status] ?? 'Updated', {
-        description: appointment.patient.fullName,
-      });
-    } catch (e) {
-      toast.error('Couldn’t update the appointment', { description: (e as Error).message });
-    }
-  };
+  const dialogs = (
+    <>
+      <ConfirmDialog
+        open={Boolean(step)}
+        onOpenChange={(o) => !o && close()}
+        title={step?.title ?? ''}
+        description={
+          step &&
+          state && (
+            <>
+              <span className="block font-medium text-foreground">
+                {state.appointment.patient.fullName}
+              </span>
+              {step.description}
+            </>
+          )
+        }
+        confirmLabel={step?.label}
+        loading={setStatus.isPending}
+        onConfirm={() => {
+          if (!state || !step) return;
+          setStatus.mutate(
+            { id: state.appointment.id, status: step.status },
+            {
+              onSuccess: () => {
+                toast.success(step.done, { description: state.appointment.patient.fullName });
+                close();
+              },
+              onError: (e) => toast.error(e.message),
+            },
+          );
+        }}
+      />
+      {state?.action === 'cancel' && (
+        <CancelDialog appointment={state.appointment} open onOpenChange={(o) => !o && close()} />
+      )}
+      {state?.action === 'reschedule' && (
+        <RescheduleDialog
+          appointment={state.appointment}
+          open
+          onOpenChange={(o) => !o && close()}
+        />
+      )}
+    </>
+  );
 
   return {
-    setStatus,
-    pending: update.isPending,
-    canCheckIn: manage && s === 'scheduled' && isToday(start),
-    canComplete:
-      (manage || write) && (s === 'scheduled' || s === 'checked_in') && start <= new Date(),
-    canNoShow: manage && s === 'scheduled' && start <= new Date(),
-    canReschedule: manage && s === 'scheduled',
-    canCancel: manage && (s === 'scheduled' || s === 'checked_in'),
-    canWriteNote:
-      write && (s === 'checked_in' || s === 'completed') && appointment.noteStatus !== 'submitted',
-    canViewNote: appointment.noteStatus === 'submitted' && can('clinical.view'),
+    open: React.useCallback(
+      (action: AppointmentAction, appointment: AppointmentItem) =>
+        setState({ action, appointment }),
+      [],
+    ),
+    dialogs,
   };
 }
 
-export function AppointmentActions({
+/** The actions an appointment offers now, in the order screens show them. */
+export function availableActions(a: AppointmentItem) {
+  const list: { action: AppointmentAction; label: string; icon: typeof Ban; danger?: boolean }[] =
+    [];
+  if (a.actions.confirm) list.push({ action: 'confirm', label: 'Confirm', icon: CircleCheck });
+  if (a.actions.complete)
+    list.push({ action: 'complete', label: 'Mark completed', icon: CheckCircle2 });
+  if (a.actions.noShow) list.push({ action: 'noShow', label: 'Mark no-show', icon: UserX });
+  if (a.actions.reschedule)
+    list.push({ action: 'reschedule', label: 'Reschedule', icon: CalendarClock });
+  if (a.actions.cancel) list.push({ action: 'cancel', label: 'Cancel', icon: Ban, danger: true });
+  return list;
+}
+
+export function AppointmentActionsMenu({
   appointment,
-  showPrimary = true,
+  onAction,
+  onView,
 }: {
-  appointment: AppointmentWithRefs;
-  /** Show the most likely next action as a visible button */
-  showPrimary?: boolean;
+  appointment: AppointmentItem;
+  onAction: (action: AppointmentAction, appointment: AppointmentItem) => void;
+  /** Open details in place (e.g. a sheet); defaults to the details page */
+  onView?: () => void;
 }) {
-  const a = useAppointmentActions(appointment);
-  const [cancelOpen, setCancelOpen] = React.useState(false);
-  const [rescheduleOpen, setRescheduleOpen] = React.useState(false);
-  const [reason, setReason] = React.useState(cancelReasons[0]);
-  const noteHref = `/clinical/notes/${appointment.id}`;
-
-  const primary = !showPrimary ? null : a.canWriteNote ? (
-    <Button size="sm" variant="secondary" asChild>
-      <Link href={noteHref}>
-        <FilePen /> {appointment.noteStatus === 'draft' ? 'Continue note' : 'Write note'}
-      </Link>
-    </Button>
-  ) : a.canCheckIn ? (
-    <Button
-      size="sm"
-      variant="secondary"
-      onClick={() => a.setStatus('checked_in')}
-      loading={a.pending}
-    >
-      <LogIn /> Check in
-    </Button>
-  ) : null;
-
-  const hasMenu = a.canComplete || a.canNoShow || a.canReschedule || a.canCancel || a.canViewNote;
-
+  const actions = availableActions(appointment);
   return (
-    <div className="flex items-center justify-end gap-1.5">
-      {primary}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Actions for ${appointment.patient.fullName}`}
-          >
-            <Ellipsis />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-52">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Actions for ${appointment.patient.fullName}’s appointment`}
+        >
+          <Ellipsis />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {onView ? (
+          <DropdownMenuItem onSelect={onView}>
+            <Eye /> View details
+          </DropdownMenuItem>
+        ) : (
           <DropdownMenuItem asChild>
-            <Link href={`/patients/${appointment.patientId}`}>
-              <UserRound /> View patient
+            <Link href={appointmentLinks.detail(appointment.id)}>
+              <Eye /> View details
             </Link>
           </DropdownMenuItem>
-          {hasMenu && <DropdownMenuSeparator />}
-          {a.canCheckIn && !primary && (
-            <DropdownMenuItem onSelect={() => a.setStatus('checked_in')}>
-              <LogIn /> Check in
-            </DropdownMenuItem>
-          )}
-          {a.canComplete && (
-            <DropdownMenuItem onSelect={() => a.setStatus('completed')}>
-              <CheckCircle2 /> Mark as completed
-            </DropdownMenuItem>
-          )}
-          {a.canNoShow && (
-            <DropdownMenuItem onSelect={() => a.setStatus('no_show')}>
-              <UserX /> Mark as no-show
-            </DropdownMenuItem>
-          )}
-          {a.canWriteNote && !primary && (
-            <DropdownMenuItem asChild>
-              <Link href={noteHref}>
-                <FilePen /> Write session note
-              </Link>
-            </DropdownMenuItem>
-          )}
-          {a.canViewNote && (
-            <DropdownMenuItem asChild>
-              <Link href={noteHref}>
-                <FilePen /> View session note
-              </Link>
-            </DropdownMenuItem>
-          )}
-          {a.canReschedule && (
-            <DropdownMenuItem onSelect={() => setRescheduleOpen(true)}>
-              <CalendarClock /> Reschedule
-            </DropdownMenuItem>
-          )}
-          {a.canCancel && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem tone="danger" onSelect={() => setCancelOpen(true)}>
-                <Ban /> Cancel appointment
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        )}
+        {actions.length > 0 && <DropdownMenuSeparator />}
+        {actions.map(({ action, label, icon: Icon, danger }) => (
+          <DropdownMenuItem
+            key={action}
+            tone={danger ? 'danger' : 'default'}
+            onSelect={() => onAction(action, appointment)}
+          >
+            <Icon /> {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-      <ConfirmDialog
-        open={cancelOpen}
-        onOpenChange={setCancelOpen}
-        title="Cancel this appointment?"
-        description={`${appointment.patient.fullName}’s session will be cancelled. If it was booked from a package, the session goes back to their balance.`}
-        confirmLabel="Cancel appointment"
-        cancelLabel="Keep it"
-        tone="danger"
-        loading={a.pending}
-        onConfirm={async () => {
-          await a.setStatus('cancelled', reason);
-          setCancelOpen(false);
-        }}
-      >
-        <Field label="Reason">
-          <Select value={reason} onValueChange={setReason}>
+/**
+ * Cancels with a reason; nothing is deleted. Inside the center's cutoff it says the
+ * cancellation counts as late. For a series, staff can cancel this and every later open
+ * appointment instead (completed ones are never touched).
+ */
+function CancelDialog({
+  appointment: a,
+  open,
+  onOpenChange,
+}: {
+  appointment: AppointmentItem;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { can } = useSession();
+  const fmt = useCenterFormat();
+  const scheduling = useSchedulingSettings();
+  const cancelOne = useCancelAppointment();
+  const cancelSeries = useCancelSeries();
+  const [reason, setReason] = React.useState<CancellationReason | undefined>();
+  const [note, setNote] = React.useState('');
+  const [scope, setScope] = React.useState<'one' | 'following'>('one');
+  const [touched, setTouched] = React.useState(false);
+  const canSeries = Boolean(a.seriesId) && can('appointments.manage_recurring');
+  const pending = cancelOne.isPending || cancelSeries.isPending;
+  const cutoff = scheduling.data?.cancellationCutoffMinutes ?? 0;
+
+  const submit = () => {
+    setTouched(true);
+    if (!reason) return;
+    const input = { reason, note: note.trim() || undefined };
+    const done = (message: string) => {
+      toast.success(message, { description: a.patient.fullName });
+      onOpenChange(false);
+    };
+    if (scope === 'following' && a.seriesId) {
+      cancelSeries.mutate(
+        { id: a.seriesId, input: { ...input, fromAppointmentId: a.id } },
+        {
+          onSuccess: (r) =>
+            done(`${r.cancelled} appointment${r.cancelled === 1 ? '' : 's'} cancelled`),
+          onError: (e) => toast.error(e.message),
+        },
+      );
+    } else {
+      cancelOne.mutate(
+        { id: a.id, input },
+        {
+          onSuccess: () => done('Appointment cancelled'),
+          onError: (e) => toast.error(e.message),
+        },
+      );
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Cancel appointment?</DialogTitle>
+          <DialogDescription>
+            {a.patient.fullName} · {fmt.shortDate(a.date)}, {fmt.range(a)} with{' '}
+            {a.therapist.fullName}. It stays in the history as cancelled and its time is freed.
+          </DialogDescription>
+        </DialogHeader>
+
+        {a.actions.lateCancellation && (
+          <p className="rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-[13px] text-warning-foreground">
+            This is a late cancellation: it starts within the {formatMinutes(cutoff)} cancellation
+            cutoff, and will be recorded as late.
+          </p>
+        )}
+
+        {canSeries && (
+          <RadioGroup value={scope} onValueChange={(v) => setScope(v as typeof scope)}>
+            <RadioCard value="one" title="This appointment only" />
+            <RadioCard
+              value="following"
+              title="This and following appointments"
+              description="Every later scheduled or confirmed appointment of this series. Completed ones are kept."
+            />
+          </RadioGroup>
+        )}
+
+        <Field label="Reason" required error={touched && !reason ? 'Choose a reason' : undefined}>
+          <Select value={reason} onValueChange={(v) => setReason(v as CancellationReason)}>
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder="Choose a reason" />
             </SelectTrigger>
             <SelectContent>
-              {cancelReasons.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {r}
+              {Object.entries(CANCELLATION_REASONS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </Field>
-      </ConfirmDialog>
-      {a.canReschedule && (
-        <RescheduleDialog
-          appointment={appointment}
-          open={rescheduleOpen}
-          onOpenChange={setRescheduleOpen}
-        />
-      )}
-    </div>
+        <Field label="Note" optional>
+          <Textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={500}
+            rows={3}
+          />
+        </Field>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
+            Keep appointment
+          </Button>
+          <Button variant="danger" onClick={submit} loading={pending}>
+            {scope === 'following' ? 'Cancel appointments' : 'Cancel appointment'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

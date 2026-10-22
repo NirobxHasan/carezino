@@ -6,7 +6,7 @@ import { ClipboardCheck, Repeat } from 'lucide-react';
 
 import { AppointmentStatusBadge, NoteStatusBadge } from '@/components/domain/status-badges';
 import { TherapyTypeTag } from '@/components/domain/therapy-type';
-import type { AppointmentWithRefs } from '@/lib/api/appointments';
+import type { AppointmentWithRefs } from '@/lib/api/prototype-appointments';
 import { formatTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { AppointmentActions } from './appointment-actions';

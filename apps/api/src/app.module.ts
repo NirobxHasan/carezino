@@ -5,15 +5,18 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AppointmentsModule } from './appointments/appointments.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard, PermissionsGuard, SessionGuard } from './auth/guards';
 import { throttlerOptions } from './auth/throttle';
 import { CenterSettingsModule } from './center-settings/center-settings.module';
 import { CentersModule } from './centers/centers.module';
 import { CommonModule } from './common/common.module';
+import { PatientsModule } from './patients/patients.module';
 import { PlatformModule } from './platform/platform.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StaffModule } from './staff/staff.module';
+import { TherapistsModule } from './therapists/therapists.module';
 import { TherapyTypesModule } from './therapy-types/therapy-types.module';
 
 @Module({
@@ -28,6 +31,9 @@ import { TherapyTypesModule } from './therapy-types/therapy-types.module';
     PlatformModule,
     TherapyTypesModule,
     CenterSettingsModule,
+    TherapistsModule,
+    PatientsModule,
+    AppointmentsModule,
   ],
   controllers: [AppController],
   providers: [

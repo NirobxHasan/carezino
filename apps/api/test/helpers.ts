@@ -58,7 +58,7 @@ export async function createTestApp() {
 
 export async function resetDatabase(prisma: PrismaService) {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE "AuditLog", "Invitation", "PasswordResetToken", "Session", "CenterMembership", "User", "TherapyDurationOption", "TherapyType", "CenterWorkingHour", "CenterClosure", "CenterSchedulingSettings", "CenterGeneralSettings", "Center" CASCADE',
+    'TRUNCATE "AppointmentHistory", "Appointment", "AppointmentSeries", "PatientConsent", "PatientTherapyInterest", "PatientGuardian", "Guardian", "Patient", "CenterSequence", "TherapistTimeOff", "TherapistAvailability", "TherapistSpecialization", "Therapist", "AuditLog", "Invitation", "PasswordResetToken", "Session", "CenterMembership", "User", "TherapyDurationOption", "TherapyType", "CenterWorkingHour", "CenterClosure", "CenterSchedulingSettings", "CenterGeneralSettings", "Center" CASCADE',
   );
 }
 

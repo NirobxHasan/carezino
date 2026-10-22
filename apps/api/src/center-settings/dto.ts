@@ -217,10 +217,10 @@ export class UpdateSchedulingSettingsDto {
   cancellationCutoffMinutes?: number;
 }
 
-/** New patients start as active or on the waitlist; other statuses come later. */
+/** New patients start as new (not yet seen) or straight away as active. */
 export const NEW_PATIENT_STATUSES = [
+  PatientStatus.NEW,
   PatientStatus.ACTIVE,
-  PatientStatus.WAITLIST,
 ] as const;
 
 export class UpdateGeneralSettingsDto {
@@ -246,7 +246,7 @@ export class UpdateGeneralSettingsDto {
 
   @IfPresent()
   @IsIn(NEW_PATIENT_STATUSES, {
-    message: 'New patients can start as active or on the waitlist',
+    message: 'New patients can start as new or active',
   })
   defaultPatientStatus?: PatientStatus;
 

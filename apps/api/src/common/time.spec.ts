@@ -1,10 +1,13 @@
 import {
+  addDays,
   daysInclusive,
   formatClock,
   formatIsoDate,
+  instantToZoned,
   parseClock,
   parseIsoDate,
   todayIn,
+  zonedToInstant,
 } from './time';
 
 describe('clock times', () => {
@@ -47,5 +50,48 @@ describe('calendar dates', () => {
     const now = new Date('2026-10-21T20:30:00Z');
     expect(formatIsoDate(todayIn('Asia/Dhaka', now))).toBe('2026-10-22');
     expect(formatIsoDate(todayIn('America/New_York', now))).toBe('2026-10-21');
+  });
+});
+
+describe('time zones', () => {
+  const date = parseIsoDate('2026-10-22')!;
+
+  it('turns a wall-clock time in a zone into an instant', () => {
+    expect(zonedToInstant(date, 9 * 60, 'Asia/Dhaka').toISOString()).toBe(
+      '2026-10-22T03:00:00.000Z',
+    );
+    // 1440 is the following midnight.
+    expect(zonedToInstant(date, 1440, 'Asia/Dhaka').toISOString()).toBe(
+      '2026-10-22T18:00:00.000Z',
+    );
+  });
+
+  it('turns an instant back into the zone’s date and time of day', () => {
+    const { date: d, minutes } = instantToZoned(
+      new Date('2026-10-21T20:30:00Z'),
+      'Asia/Dhaka',
+    );
+    expect(formatIsoDate(d)).toBe('2026-10-22');
+    expect(minutes).toBe(150);
+  });
+
+  it('follows daylight saving changes', () => {
+    // New York moves from UTC-4 to UTC-5 on 1 Nov 2026.
+    const before = parseIsoDate('2026-10-31')!;
+    const after = addDays(before, 2);
+    expect(
+      zonedToInstant(before, 12 * 60, 'America/New_York').toISOString(),
+    ).toBe('2026-10-31T16:00:00.000Z');
+    expect(
+      zonedToInstant(after, 12 * 60, 'America/New_York').toISOString(),
+    ).toBe('2026-11-02T17:00:00.000Z');
+    const back = instantToZoned(
+      new Date('2026-11-02T17:00:00Z'),
+      'America/New_York',
+    );
+    expect([formatIsoDate(back.date), back.minutes]).toEqual([
+      '2026-11-02',
+      720,
+    ]);
   });
 });

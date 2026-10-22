@@ -29,7 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { SegmentedList, SegmentedTrigger, Tabs } from '@/components/ui/tabs';
-import { AppointmentCard } from '@/features/appointments/appointment-card';
+import { AppointmentCard } from './prototype/appointment-card';
 import { paymentMethodLabels } from '@/lib/api/finance';
 import { useDashboard, type DashboardAlert } from '@/lib/api/dashboard';
 import { formatAgo, formatRelativeDay, formatTaka, formatTime } from '@/lib/format';
@@ -69,14 +69,14 @@ export function DashboardScreen() {
         description={`${format(now, 'EEEE, d MMMM')} · ${activeCenter.name}`}
         actions={
           <>
-            {can('patients.manage') && (
+            {can('patients.create') && (
               <Button variant="secondary" asChild>
                 <Link href="/patients/new">
                   <UserPlus /> Register patient
                 </Link>
               </Button>
             )}
-            {can('appointments.manage') ? (
+            {can('appointments.create') ? (
               <Button asChild>
                 <Link href="/appointments/new">
                   <CalendarPlus /> Book appointment
@@ -158,7 +158,7 @@ export function DashboardScreen() {
               value={data?.kpis.upcomingAppointments ?? 0}
               hint="Next 7 days"
               icon={CalendarClock}
-              href="/appointments?view=week"
+              href="/appointments/calendar"
               loading={isLoading}
             />
           </section>

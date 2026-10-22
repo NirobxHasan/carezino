@@ -5,7 +5,12 @@ import {
   type ValidationOptions,
 } from 'class-validator';
 
-import { normalizeEmail, normalizeMobile, normalizePhone } from './identifiers';
+import {
+  normalizeAnyMobile,
+  normalizeEmail,
+  normalizeMobile,
+  normalizePhone,
+} from './identifiers';
 
 /** Trims strings and turns empty strings into undefined, so optional fields stay optional. */
 export const Trim = () =>
@@ -50,6 +55,38 @@ export const NormalizeMobile = ({ clearable = false } = {}) =>
     return normalizeMobile(value) ?? value;
   });
 
+/**
+ * Like NormalizeMobile, but also accepts international numbers (see normalizeAnyMobile).
+ * With `emptyAsNull`, an empty string becomes null so a PATCH can't silently skip it.
+ */
+export const NormalizeAnyMobile = ({ emptyAsNull = false } = {}) =>
+  Transform(({ value }: { value: unknown }) => {
+    if (typeof value !== 'string') return value;
+    if (value.trim() === '') return emptyAsNull ? null : undefined;
+    return normalizeAnyMobile(value) ?? value;
+  });
+
+/** "example.com/me.jpg" → "https://example.com/me.jpg"; empty → null so it can be cleared. */
+export const NormalizeUrl = () =>
+  Transform(({ value }: { value: unknown }) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    if (trimmed === '') return null;
+    return /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+  });
+
+/** IsUrl options for links stored after NormalizeUrl, such as photos. */
+export const URL_OPTIONS = {
+  protocols: ['http', 'https'],
+  require_protocol: true,
+};
+
+/** Empty strings from cleared selects become null. */
+export const EmptyToNull = () =>
+  Transform(({ value }: { value: unknown }) => (value === '' ? null : value));
+
 export const NormalizePhone = () =>
   Transform(({ value }: { value: unknown }) => {
     if (typeof value !== 'string') return value;
@@ -65,6 +102,21 @@ export function IsMobile(options?: ValidationOptions) {
           typeof value === 'string' && normalizeMobile(value) === value,
         defaultMessage: () =>
           'Enter an 11-digit mobile number, e.g. 01712-345678',
+      },
+    },
+    options,
+  );
+}
+
+export function IsAnyMobile(options?: ValidationOptions) {
+  return ValidateBy(
+    {
+      name: 'isAnyMobile',
+      validator: {
+        validate: (value) =>
+          typeof value === 'string' && normalizeAnyMobile(value) === value,
+        defaultMessage: () =>
+          'Enter a mobile number, e.g. 01712-345678, or +44… for numbers abroad',
       },
     },
     options,

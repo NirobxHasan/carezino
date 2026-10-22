@@ -18,9 +18,9 @@ import type { AppNotification, ID, TherapistStatus } from '../types';
 import { backend, clone, latency } from './client';
 import { keys } from './keys';
 import { patientRef, therapistRef } from './refs';
-import type { AppointmentWithRefs } from './appointments';
+import type { AppointmentWithRefs } from './prototype-appointments';
 import type { PaymentWithRefs } from './finance';
-import { capacityFor, workingWindow } from './therapists';
+import { capacityFor, workingWindow } from './prototype-therapists';
 
 export interface TherapistAvailability {
   id: ID;

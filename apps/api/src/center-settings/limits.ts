@@ -18,4 +18,17 @@ export const LIMITS = {
   /** Up to 30 days */
   minimumBookingNoticeMinutes: { min: 0, max: 43_200 },
   cancellationCutoffMinutes: { min: 0, max: 43_200 },
+  /** Therapy types one therapist can be assigned */
+  specializationsPerTherapist: 20,
+  /** Longest single time-off entry, in days */
+  timeOffDays: 366,
+  /** Most days one schedule overview request can cover (six weeks, for a month grid) */
+  scheduleDays: 42,
+  yearsOfExperience: { min: 0, max: 70 },
+  /** Most appointments one recurring booking can create */
+  seriesOccurrences: 100,
+  /** Furthest a recurring booking's end date can be from its start date, in days */
+  seriesSpanDays: 365,
+  /** Repeat every N days, weeks or months */
+  seriesInterval: { min: 1, max: 12 },
 } as const;

@@ -26,18 +26,17 @@ export class WorkingHoursService {
     private readonly audit: AuditService,
   ) {}
 
+  /** Sequential on purpose: a transaction is one connection, which can't run queries in parallel. */
   private async read(tx: Prisma.TransactionClient, centerId: string) {
-    const [center, rows] = await Promise.all([
-      tx.center.findUniqueOrThrow({
-        where: { id: centerId },
-        select: { timezone: true },
-      }),
-      tx.centerWorkingHour.findMany({
-        where: { centerId },
-        select: rowSelect,
-        orderBy: [{ dayOfWeek: 'asc' }, { startMinutes: 'asc' }],
-      }),
-    ]);
+    const center = await tx.center.findUniqueOrThrow({
+      where: { id: centerId },
+      select: { timezone: true },
+    });
+    const rows = await tx.centerWorkingHour.findMany({
+      where: { centerId },
+      select: rowSelect,
+      orderBy: [{ dayOfWeek: 'asc' }, { startMinutes: 'asc' }],
+    });
     return { timezone: center.timezone, days: toWeek(rows) };
   }
 

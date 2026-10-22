@@ -3,6 +3,13 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 function pageList(page: number, pageCount: number): (number | 'gap')[] {
@@ -22,12 +29,16 @@ export function Pagination({
   pageSize,
   total,
   onPageChange,
+  pageSizeOptions,
+  onPageSizeChange,
   className,
 }: {
   page: number;
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (pageSize: number) => void;
   className?: string;
 }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -39,9 +50,25 @@ export function Pagination({
       aria-label="Pagination"
       className={cn('flex flex-wrap items-center justify-between gap-3 px-4 py-3', className)}
     >
-      <p className="text-[13px] text-muted-foreground tabular" aria-live="polite">
-        {total === 0 ? 'No results' : `Showing ${from}–${to} of ${total}`}
-      </p>
+      <div className="flex items-center gap-3">
+        <p className="text-[13px] text-muted-foreground tabular" aria-live="polite">
+          {total === 0 ? 'No results' : `Showing ${from}–${to} of ${total}`}
+        </p>
+        {pageSizeOptions && onPageSizeChange && (
+          <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
+            <SelectTrigger size="sm" className="w-auto gap-1.5" aria-label="Rows per page">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {pageSizeOptions.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n} per page
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
       {pageCount > 1 && (
         <div className="flex items-center gap-1">
           <Button

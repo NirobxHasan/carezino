@@ -44,6 +44,30 @@ model Center {
   closures           CenterClosure[]
   schedulingSettings CenterSchedulingSettings?
   generalSettings    CenterGeneralSettings?
+  therapists         Therapist[]
+  therapistHours     TherapistAvailability[]
+  therapistTimeOff   TherapistTimeOff[]
+  sequences          CenterSequence[]
+  patients           Patient[]
+  guardians          Guardian[]
+  patientConsents    PatientConsent[]
+  appointmentSeries  AppointmentSeries[]
+  appointments       Appointment[]
+  appointmentHistory AppointmentHistory[]
+}
+
+/// Per-center counters for human-readable numbers such as patient codes. A number is
+/// taken by incrementing the row inside the transaction that uses it, so the row lock
+/// serializes concurrent writers and a rolled-back write gives its number back.
+model CenterSequence {
+  centerId  String @db.Uuid
+  /// What is being numbered, e.g. "patient"
+  name      String
+  lastValue Int    @default(0)
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+
+  @@id([centerId, name])
 }
 
 // ── Identity ────────────────────────────────────────────────────────────────
@@ -70,11 +94,18 @@ model User {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
-  memberships         CenterMembership[]
-  sessions            Session[]
-  passwordResetTokens PasswordResetToken[]
-  invitationsSent     Invitation[]         @relation("InvitedBy")
-  auditLogs           AuditLog[]
+  memberships           CenterMembership[]
+  sessions              Session[]
+  passwordResetTokens   PasswordResetToken[]
+  invitationsSent       Invitation[]         @relation("InvitedBy")
+  auditLogs             AuditLog[]
+  patientsRegistered    Patient[]            @relation("PatientRegisteredBy")
+  consentsRecorded      PatientConsent[]     @relation("ConsentRecordedBy")
+  appointmentsBooked    Appointment[]        @relation("AppointmentCreatedBy")
+  appointmentsUpdated   Appointment[]        @relation("AppointmentUpdatedBy")
+  appointmentsCancelled Appointment[]        @relation("AppointmentCancelledBy")
+  seriesBooked          AppointmentSeries[]  @relation("SeriesCreatedBy")
+  appointmentChanges    AppointmentHistory[] @relation("AppointmentChangedBy")
 }
 
 // ── Access ──────────────────────────────────────────────────────────────────
@@ -102,8 +133,10 @@ model CenterMembership {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  center    Center     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  /// The therapist profile this staff member signs in as, if any
+  therapist Therapist?
 
   @@unique([centerId, userId])
   @@index([userId])
@@ -210,8 +243,12 @@ model TherapyType {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  center          Center                  @relation(fields: [centerId], references: [id], onDelete: Restrict)
-  durationOptions TherapyDurationOption[]
+  center           Center                    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  durationOptions  TherapyDurationOption[]
+  specializations  TherapistSpecialization[]
+  patientInterests PatientTherapyInterest[]
+  appointments     Appointment[]
+  series           AppointmentSeries[]
 
   @@unique([centerId, code])
   @@unique([centerId, name])
@@ -310,12 +347,12 @@ enum DefaultDurationBehavior {
   ASK_EACH_TIME
 }
 
-/// Patient lifecycle. The patients module will reuse this enum.
+/// Patient lifecycle. Registration starts at NEW or ACTIVE (CenterGeneralSettings);
+/// INACTIVE keeps the record and its history but takes the patient out of day-to-day work.
 enum PatientStatus {
+  NEW
   ACTIVE
-  WAITLIST
-  ON_HOLD
-  DISCHARGED
+  INACTIVE
 }
 
 enum DateDisplayFormat {
@@ -340,7 +377,7 @@ model CenterGeneralSettings {
   autoGeneratePatientCode Boolean                 @default(true)
   /// e.g. "P-" gives P-0001. Null: codes are numbers only.
   patientCodePrefix       String?
-  defaultPatientStatus    PatientStatus           @default(ACTIVE)
+  defaultPatientStatus    PatientStatus           @default(NEW)
   dateFormat              DateDisplayFormat       @default(D_MMM_YYYY)
   timeFormat              TimeDisplayFormat       @default(H12)
   /// First day of the week on calendars: 0 = Sunday, 1 = Monday, 6 = Saturday
@@ -348,4 +385,490 @@ model CenterGeneralSettings {
   updatedAt               DateTime                @updatedAt
 
   center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+}
+
+// ── Therapists ──────────────────────────────────────────────────────────────
+// A therapist is a center-scoped professional profile: the operational record that
+// specializations, availability, time off and (later) appointments and notes point at.
+// It needn't have a login; a staff membership of the same center can be linked to it.
+// Times of day are minutes since midnight in the center's time zone, as for
+// CenterWorkingHour.
+
+enum TherapistStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  VISITING
+  CONTRACTUAL
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+/// Profiles are never hard-deleted (deletedAt), so later records can always refer to them.
+model Therapist {
+  id                 String          @id @default(uuid()) @db.Uuid
+  centerId           String          @db.Uuid
+  /// Generated per center, e.g. TH-0007. Never reused, even after deletion.
+  code               String
+  fullName           String
+  /// BD mobiles as 11 local digits (01712345678); other countries in +E.164 form
+  mobile             String
+  /// Stored trimmed and lower-cased
+  email              String?
+  gender             Gender?
+  photoUrl           String?
+  designation        String?
+  qualifications     String?
+  registrationNumber String?
+  yearsOfExperience  Int?
+  joiningDate        DateTime?       @db.Date
+  employmentType     EmploymentType?
+  notes              String?
+  /// Inactive therapists keep their history but can't be booked. Not the same as
+  /// their staff membership's status, which controls sign-in.
+  status             TherapistStatus @default(ACTIVE)
+  /// Optional link to a staff membership in the same center (checked by the API)
+  membershipId       String?         @unique @db.Uuid
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  deletedAt          DateTime?
+
+  center          Center                    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  membership      CenterMembership?         @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  specializations TherapistSpecialization[]
+  availability    TherapistAvailability[]
+  timeOff         TherapistTimeOff[]
+  appointments    Appointment[]
+  series          AppointmentSeries[]
+
+  @@unique([centerId, code])
+  @@index([centerId, deletedAt, status])
+  @@index([centerId, fullName])
+}
+
+/// A therapy type the therapist provides. At most one per therapist is primary (the API
+/// keeps it so). Appointments and notes will store the therapy type themselves, so
+/// removing a specialization never changes past records.
+model TherapistSpecialization {
+  id            String   @id @default(uuid()) @db.Uuid
+  therapistId   String   @db.Uuid
+  therapyTypeId String   @db.Uuid
+  isPrimary     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  therapist   Therapist   @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  therapyType TherapyType @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([therapistId, therapyTypeId])
+  @@index([therapyTypeId])
+}
+
+/// One recurring weekly interval. Inactive rows are a day switched off in the editor,
+/// kept so switching it back on restores its hours; only active rows count.
+model TherapistAvailability {
+  id           String   @id @default(uuid()) @db.Uuid
+  centerId     String   @db.Uuid
+  therapistId  String   @db.Uuid
+  /// 0 = Sunday … 6 = Saturday
+  dayOfWeek    Int
+  startMinutes Int
+  endMinutes   Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  center    Center    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapist Therapist @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+
+  @@unique([therapistId, dayOfWeek, startMinutes])
+  @@index([centerId, dayOfWeek])
+}
+
+enum TimeOffReason {
+  PERSONAL
+  SICK
+  TRAINING
+  VACATION
+  EMERGENCY
+  SCHEDULE_CHANGE
+  OTHER
+}
+
+/// A period the therapist is away, overriding their weekly availability. Bookings in the
+/// period are never changed here; scheduling reads these to stop new ones.
+model TherapistTimeOff {
+  id          String         @id @default(uuid()) @db.Uuid
+  centerId    String         @db.Uuid
+  therapistId String         @db.Uuid
+  /// Half-open [startAt, endAt). All-day entries run from midnight to midnight in the
+  /// center's time zone.
+  startAt     DateTime
+  endAt       DateTime
+  isAllDay    Boolean        @default(false)
+  reason      TimeOffReason?
+  note        String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  center    Center    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapist Therapist @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+
+  @@index([therapistId, endAt])
+  @@index([centerId, startAt])
+}
+
+// ── Patients ────────────────────────────────────────────────────────────────
+// A patient is the center-scoped record that assessments, bookings, plans, notes,
+// packages and invoices will point at, so it's only ever soft-deleted (deletedAt).
+// Guardians are people in their own right, linked to patients through PatientGuardian,
+// which holds the relationship: the same person can be one child's father and another's
+// uncle. Patients who manage their own care keep their contact details on Patient and
+// need no guardian at all.
+
+enum GuardianContactType {
+  /// Parent or legal guardian
+  GUARDIAN
+  /// Another authorized caregiver or contact
+  CAREGIVER
+}
+
+/// How a guardian is related to one patient. OTHER comes with customRelationship.
+enum GuardianRelationship {
+  FATHER
+  MOTHER
+  LEGAL_GUARDIAN
+  GRANDPARENT
+  SIBLING
+  SPOUSE
+  OTHER
+}
+
+/// How the patient heard of the center. OTHER comes with referralOther.
+enum ReferralSource {
+  DOCTOR
+  SCHOOL
+  FRIEND_FAMILY
+  SOCIAL_MEDIA
+  EXISTING_PATIENT
+  WALK_IN
+  OTHER
+}
+
+model Patient {
+  id                   String          @id @default(uuid()) @db.Uuid
+  centerId             String          @db.Uuid
+  /// Unique per center and never reused, e.g. P-0042. Generated from CenterSequence
+  /// unless the center types its own codes (CenterGeneralSettings).
+  code                 String
+  fullName             String
+  dateOfBirth          DateTime?       @db.Date
+  /// Only when the date of birth isn't known: the stated age in whole months, as of
+  /// approxAgeAsOf. Never stored together with dateOfBirth; ages are computed on read.
+  approxAgeMonths      Int?
+  approxAgeAsOf        DateTime?       @db.Date
+  gender               Gender?
+  photoUrl             String?
+  primaryConcern       String?
+  /// The patient's own contact details, for adults who manage their own care. Mobiles
+  /// as for Therapist.mobile.
+  mobile               String?
+  secondaryMobile      String?
+  /// Stored trimmed and lower-cased
+  email                String?
+  address              String?
+  /// A number to call in an emergency, whoever the contacts are
+  emergencyPhone       String?
+  /// The patient is their own primary contact. Otherwise exactly one guardian link is
+  /// primary; the API keeps it so.
+  primaryContactIsSelf Boolean         @default(false)
+  status               PatientStatus   @default(NEW)
+  referralSource       ReferralSource?
+  referralOther        String?
+  internalNotes        String?
+  registeredAt         DateTime        @default(now())
+  registeredById       String          @db.Uuid
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  deletedAt            DateTime?
+
+  center           Center                   @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  registeredBy     User                     @relation("PatientRegisteredBy", fields: [registeredById], references: [id], onDelete: Restrict)
+  guardians        PatientGuardian[]
+  therapyInterests PatientTherapyInterest[]
+  consents         PatientConsent[]
+  appointments     Appointment[]
+  series           AppointmentSeries[]
+
+  @@unique([centerId, code])
+  @@index([centerId, deletedAt, status])
+  @@index([centerId, registeredAt])
+  @@index([centerId, fullName])
+  @@index([centerId, mobile])
+}
+
+/// A parent, guardian or caregiver. Center-scoped, and never merged or deleted by the
+/// API: matching mobiles only suggest the same person, staff decide. Mobile numbers
+/// aren't unique, since families share phones.
+model Guardian {
+  id              String   @id @default(uuid()) @db.Uuid
+  centerId        String   @db.Uuid
+  fullName        String
+  mobile          String
+  secondaryMobile String?
+  /// Stored trimmed and lower-cased
+  email           String?
+  address         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  center   Center            @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patients PatientGuardian[]
+  consents PatientConsent[]
+
+  @@index([centerId, mobile])
+  @@index([centerId, secondaryMobile])
+  @@index([centerId, fullName])
+}
+
+/// One guardian's relationship to one patient. Both must belong to the same center
+/// (checked by the API). Unlinking deletes this row only, never the guardian.
+model PatientGuardian {
+  id                 String               @id @default(uuid()) @db.Uuid
+  patientId          String               @db.Uuid
+  guardianId         String               @db.Uuid
+  contactType        GuardianContactType  @default(GUARDIAN)
+  relationship       GuardianRelationship
+  customRelationship String?
+  isPrimary          Boolean              @default(false)
+  isEmergencyContact Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  patient  Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  guardian Guardian @relation(fields: [guardianId], references: [id], onDelete: Restrict)
+
+  @@unique([patientId, guardianId])
+  @@index([guardianId])
+}
+
+/// A therapy the patient is interested in. Inactive therapy types stay on the patient.
+model PatientTherapyInterest {
+  id            String   @id @default(uuid()) @db.Uuid
+  patientId     String   @db.Uuid
+  therapyTypeId String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  patient     Patient     @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  therapyType TherapyType @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([patientId, therapyTypeId])
+  @@index([therapyTypeId])
+}
+
+enum ConsentPurpose {
+  /// Assessment and therapy
+  TREATMENT
+  /// Keeping and using personal and health information
+  DATA_PROCESSING
+  /// Photos and videos for therapy records
+  MEDIA
+}
+
+enum ConsentGivenBy {
+  SELF
+  GUARDIAN
+}
+
+/// Consent history, append-only: a withdrawal is a new row with granted = false, and the
+/// latest row per purpose is the current state. Recording consent here doesn't by itself
+/// meet every legal requirement; centers keep their signed forms.
+model PatientConsent {
+  id           String         @id @default(uuid()) @db.Uuid
+  centerId     String         @db.Uuid
+  patientId    String         @db.Uuid
+  purpose      ConsentPurpose
+  /// The form or policy version agreed to, e.g. "Registration form v2"
+  version      String?
+  granted      Boolean
+  givenBy      ConsentGivenBy
+  /// Set when givenBy is GUARDIAN
+  guardianId   String?        @db.Uuid
+  /// Who gave it, as named at the time
+  givenByName  String
+  note         String?
+  recordedById String         @db.Uuid
+  recordedAt   DateTime       @default(now())
+
+  center     Center    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient    Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  guardian   Guardian? @relation(fields: [guardianId], references: [id], onDelete: Restrict)
+  recordedBy User      @relation("ConsentRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([patientId, purpose, recordedAt])
+}
+
+// ── Appointments ────────────────────────────────────────────────────────────
+// A booked service: who, with whom, which therapy and when. Not a clinical record, an
+// attendance record, a package deduction or an invoice; those modules will point at
+// appointments rather than live in them. Instants are UTC; dates and times shown to
+// staff are the center's wall clock (Center.timezone). Bookable time is computed on
+// demand from schedules and existing appointments, never stored as slots.
+//
+// Overlaps are prevented by two exclusion constraints added in raw SQL (see the
+// appointments migration): one per therapist, covering [startAt, endAt + bufferMinutes),
+// and one per patient, covering [startAt, endAt). Both apply to SCHEDULED, CONFIRMED and
+// COMPLETED rows that aren't allowOverlap, so concurrent bookings can't both succeed.
+
+/// Workflow category, not a discipline: the service itself is the TherapyType.
+enum AppointmentType {
+  ASSESSMENT
+  THERAPY_SESSION
+}
+
+/// The booking's lifecycle only. COMPLETED doesn't mean a note was written or a session
+/// paid for; attendance, notes and payment are tracked by their own modules.
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum CancellationReason {
+  PATIENT_REQUEST
+  THERAPIST_UNAVAILABLE
+  CENTER_CLOSURE
+  PERSONAL_REASON
+  OTHER
+}
+
+enum AppointmentSeriesStatus {
+  ACTIVE
+  /// Its remaining occurrences were cancelled together
+  CANCELLED
+}
+
+enum AppointmentHistoryAction {
+  CREATED
+  UPDATED
+  RESCHEDULED
+  STATUS_CHANGED
+  CANCELLED
+}
+
+/// How a recurring booking was asked for. Its occurrences are ordinary Appointment rows
+/// created up front (a bounded number), so each can be moved or cancelled on its own;
+/// the series keeps the rule so later series-wide actions know what was intended.
+model AppointmentSeries {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  centerId           String                  @db.Uuid
+  patientId          String                  @db.Uuid
+  therapistId        String                  @db.Uuid
+  therapyTypeId      String                  @db.Uuid
+  type               AppointmentType
+  /// { frequency, interval, daysOfWeek, startTime, count | until }, as booked (recurrence.ts)
+  recurrenceRule     Json
+  /// The center's time zone when booked: the rule's dates and times are wall-clock there
+  timezone           String
+  durationMinutes    Int
+  startsOn           DateTime                @db.Date
+  /// The rule's end date, or the date of its last occurrence when it ends after a count
+  endsOn             DateTime                @db.Date
+  status             AppointmentSeriesStatus @default(ACTIVE)
+  /// Dates the rule produced that staff chose to skip because of conflicts, with reasons
+  skippedOccurrences Json?
+  createdById        String                  @db.Uuid
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  center       Center        @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  therapist    Therapist     @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  therapyType  TherapyType   @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  createdBy    User          @relation("SeriesCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  appointments Appointment[]
+
+  @@index([centerId, patientId])
+  @@index([therapistId])
+}
+
+/// Never deleted: cancelling sets status CANCELLED and keeps the row and its history.
+model Appointment {
+  id                 String              @id @default(uuid()) @db.Uuid
+  centerId           String              @db.Uuid
+  /// Set when created by a recurring booking; stays set if this occurrence is moved
+  seriesId           String?             @db.Uuid
+  patientId          String              @db.Uuid
+  therapistId        String              @db.Uuid
+  therapyTypeId      String              @db.Uuid
+  type               AppointmentType
+  /// Half-open [startAt, endAt), UTC; endAt = startAt + durationMinutes
+  startAt            DateTime
+  endAt              DateTime
+  /// The booked length, kept even if the therapy type's duration options change later
+  durationMinutes    Int
+  /// CenterSchedulingSettings.bookingBufferMinutes when booked: the therapist is kept
+  /// free for this long after endAt
+  bufferMinutes      Int                 @default(0)
+  /// Booked over a clash on purpose, because the center allows double booking. Such rows
+  /// are exempt from the overlap constraints; nothing else is.
+  allowOverlap       Boolean             @default(false)
+  status             AppointmentStatus   @default(SCHEDULED)
+  internalNotes      String?
+  createdById        String              @db.Uuid
+  updatedById        String?             @db.Uuid
+  cancelledAt        DateTime?
+  cancelledById      String?             @db.Uuid
+  cancellationReason CancellationReason?
+  cancellationNote   String?
+  /// Cancelled with less notice than the center's cancellation cutoff
+  lateCancellation   Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  center      Center               @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  series      AppointmentSeries?   @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+  patient     Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  therapist   Therapist            @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  therapyType TherapyType          @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  createdBy   User                 @relation("AppointmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy   User?                @relation("AppointmentUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  cancelledBy User?                @relation("AppointmentCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  history     AppointmentHistory[]
+
+  @@index([centerId, startAt])
+  @@index([centerId, status, startAt])
+  @@index([therapistId, startAt])
+  @@index([patientId, startAt])
+  @@index([seriesId, startAt])
+}
+
+/// Append-only log of what happened to an appointment and who did it. Values hold
+/// times, people's IDs, statuses and changed field names, never note text.
+model AppointmentHistory {
+  id             String                   @id @default(uuid()) @db.Uuid
+  centerId       String                   @db.Uuid
+  appointmentId  String                   @db.Uuid
+  action         AppointmentHistoryAction
+  previousValues Json?
+  newValues      Json?
+  reason         String?
+  performedById  String                   @db.Uuid
+  createdAt      DateTime                 @default(now())
+
+  center      Center      @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  performedBy User        @relation("AppointmentChangedBy", fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([appointmentId, createdAt])
 }

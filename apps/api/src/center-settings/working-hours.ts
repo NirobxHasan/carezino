@@ -21,12 +21,19 @@ export type WorkingDay = {
   intervals: { start: string; end: string }[];
 };
 
+const OPENING_HOURS_MESSAGES = {
+  endBeforeStart: 'Closing time must be after opening time',
+};
+
 /**
  * Checks a full week of opening hours and turns it into rows. Errors are keyed by the
  * request's field paths (e.g. "days.2.intervals.1.end") so forms can show them inline.
  * Intervals are same-day only; touching intervals (09:00–13:00, 13:00–18:00) are fine.
  */
-export function validateWeek(days: DayInput[]) {
+export function validateWeek(
+  days: DayInput[],
+  messages: { endBeforeStart: string } = OPENING_HOURS_MESSAGES,
+) {
   const errors: Record<string, string> = {};
   const rows: IntervalRow[] = [];
   const seen = new Set<number>();
@@ -52,7 +59,7 @@ export function validateWeek(days: DayInput[]) {
       if (end === null) errors[`${path}.end`] = 'Enter a time like 18:00';
       if (start === null || end === null) return;
       if (start >= end) {
-        errors[`${path}.end`] = 'Closing time must be after opening time';
+        errors[`${path}.end`] = messages.endBeforeStart;
         return;
       }
       parsed.push({ index: i, start, end });

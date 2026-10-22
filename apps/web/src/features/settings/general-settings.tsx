@@ -75,7 +75,7 @@ const schema = z.object({
       (v) => v === '' || /^[A-Z0-9][A-Z0-9-]{0,7}$/.test(v),
       'Use up to 8 letters, numbers or dashes, e.g. P-',
     ),
-  defaultPatientStatus: z.enum(['ACTIVE', 'WAITLIST']),
+  defaultPatientStatus: z.enum(['NEW', 'ACTIVE']),
   dateFormat: z.enum(['D_MMM_YYYY', 'DD_MM_YYYY', 'MM_DD_YYYY', 'YYYY_MM_DD']),
   timeFormat: z.enum(['H12', 'H24']),
   weekStartsOn: z.string(),
@@ -217,8 +217,8 @@ function GeneralForm({ settings }: { settings: GeneralSettings }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="NEW">New</SelectItem>
                         <SelectItem value="ACTIVE">Active</SelectItem>
-                        <SelectItem value="WAITLIST">Waitlist</SelectItem>
                       </SelectContent>
                     </Select>
                   </Field>

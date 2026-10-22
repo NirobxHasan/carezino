@@ -72,6 +72,35 @@ The e2e tests truncate every table, so they refuse to run without `TEST_DATABASE
 - **Super admin (platform admin):** `User.isPlatformAdmin` with a `username`, signs in at `/admin/login` (`POST /auth/admin/login`). The `/admin` area (`app/(platform)`) lists every center and registers new ones through `/platform/*` endpoints marked `@PlatformAdminOnly()`; these are cross-center and don't use `@Tenant()`. Public `/register` is off unless `PUBLIC_REGISTRATION_ENABLED=true`. Create or reset a super admin with `PLATFORM_ADMIN_USERNAME=… PLATFORM_ADMIN_PASSWORD=… npm run platform:create-admin -w @carezino/api [-- --reset-password]`; never hard-code credentials.
 - Sensitive admin actions are written to `AuditLog` via `AuditService.record(entry, tx)`. Never put credentials or tokens in its metadata.
 
+## Therapists (apps/api/src/therapists)
+
+- A `Therapist` is a center-scoped professional profile, not a login. It can optionally link to one `CenterMembership` of the same center (`membershipId`); never create users or passwords for it.
+- Profiles are soft-deleted (`deletedAt`); every query goes through `visibleTherapists(tenant)`, which also limits callers without `therapists.read` (the THERAPIST role has only `therapists.read_own`) to their own linked profile. Anything else is a 404.
+- Weekly availability (`TherapistAvailability`), time off (`TherapistTimeOff`, UTC instants, half-open) and center hours/closures are combined on demand by `ScheduleService`/`schedule.ts`; no slots are stored. Results are working windows, not free slots; free slots come from the appointments module, which builds on `ScheduleService.facts`.
+- `THERAPIST_APPOINTMENTS` (`appointments.port.ts`) is how therapist screens ask about bookings without importing the appointments module; `TherapistsModule` binds it to `appointments/therapist-appointments.ts`. A null result means "not checked", never "no conflicts".
+- The web's dashboard prototype still uses mock therapists (`lib/api/prototype-therapists.ts`); the real screens use `lib/api/therapists.ts`.
+
+## Patients and guardians (apps/api/src/patients)
+
+- A `Patient` is center-scoped and soft-deleted only (`deletedAt`); every query goes through `visiblePatients(tenant)` in `access.ts`, the one place to narrow access later (therapists have no patient permissions until patients can be assigned to them).
+- Codes come from `CenterGeneralSettings` (`patientCodePrefix`, e.g. `P-0001`) via the row-locked `CenterSequence` counter (`common/sequences.ts`), never `MAX+1`; numbers aren't reused. With `autoGeneratePatientCode` off, staff type codes.
+- Age is a date of birth *or* an approximate age stored as months plus the date it was given (`approxAgeMonths`/`approxAgeAsOf`), never both; the API computes `age` on read.
+- `Guardian` is a person (center-scoped, never merged or deleted); `PatientGuardian` holds the per-patient relationship, `isPrimary` and `isEmergencyContact`. Self-managing adults keep their contact details on `Patient` with `primaryContactIsSelf`; exactly one primary contact always exists, so the primary link can't be unlinked. Mobile matches are only suggestions (`GET /guardians/search`).
+- `PatientConsent` is append-only history; the latest row per purpose is current.
+- Audit metadata for patients records codes, IDs and changed field *names*, never names or health details.
+- The web's dashboard/clinical/finance prototypes still use mock patients (`lib/api/prototype-patients.ts`); the real screens and global search use `lib/api/patients.ts`.
+
+## Appointments (apps/api/src/appointments)
+
+- An `Appointment` is a booked service (patient, therapist, therapy type, `type` ASSESSMENT or THERAPY_SESSION, UTC `[startAt, endAt)`), never a clinical note, attendance, package deduction or invoice. It's never deleted: cancelling sets `CANCELLED` with a reason. Every change appends an `AppointmentHistory` row (times, people, statuses and changed field *names*, never note text).
+- `rules.ts` holds the booking rules as pure functions (`evaluate`, `daySlots`, status transitions); `BookingService` gathers the facts (schedule, settings, bookings) and both slot listing and booking confirmation run the same `evaluate`, so they can't disagree. Slots sit on a grid from local midnight at the center's slot interval; durations are real minutes, wall-clock times a DST change skips are rejected.
+- Double booking is prevented by two Postgres exclusion constraints added in raw SQL (`btree_gist`): per therapist over `[startAt, endAt + bufferMinutes)` and per patient over `[startAt, endAt)`, for SCHEDULED/CONFIRMED/COMPLETED rows. Keep `BLOCKING_STATUSES` in `rules.ts` in step with their `WHERE` clause. Bookings also lock the therapist then the patient row, and re-check inside the transaction; a constraint violation (Prisma `P2039`, cause `23P01`) becomes a 409 `SLOT_TAKEN`. Rows with `allowOverlap` (only booked deliberately when the center allows double booking) are exempt.
+- Conflicts are 409 `APPOINTMENT_CONFLICT` with `conflicts: [{ reason, message }]` and `overridable`; the web reads them from `ApiError.details`.
+- Recurring bookings (`AppointmentSeries`) expand up front into at most `LIMITS.seriesOccurrences` real appointments (`recurrence.ts` documents the rules; monthly dates a month lacks fall on its last day, flagged `adjusted`). Booking is all-or-nothing unless `skipConflicts`, which records the skipped dates on the series. Each occurrence is then moved or cancelled on its own; "cancel this and following" is the only series-wide action.
+- Status changes follow `TRANSITIONS` in `rules.ts`; completed, cancelled and no-show are final. Cancelling inside `cancellationCutoffMinutes` is a late cancellation and needs `appointments.cancel_late`. Item responses carry `actions` (what the caller may do now) so every screen offers the same choices.
+- Visibility goes through `visibleAppointments(tenant)`: `appointments.read` sees the center, `appointments.read_own` (the THERAPIST role) only appointments of the therapist profile linked to their membership.
+- Responses include center-local `date`/`startTime`/`endTime`, so the web never converts time zones itself. The dashboard prototype still uses mock appointments (`lib/api/prototype-appointments.ts`, `features/dashboard/prototype/`).
+
 ## Gotchas
 
 - **Ports:** the web app (`next dev`) runs on 3000 and the API on `process.env.PORT ?? 3001` (`apps/api/src/main.ts`). Don't set a global `PORT` when running `npm run dev`, or both apps will try to use it.

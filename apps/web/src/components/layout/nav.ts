@@ -43,14 +43,16 @@ export const navGroups: NavGroup[] = [
         title: 'Appointments',
         href: '/appointments',
         icon: CalendarDays,
-        permission: 'appointments.view',
+        // Therapists see their own sessions; front desk and managers see everyone's.
+        permission: 'appointments.read_own',
       },
-      { title: 'Patients', href: '/patients', icon: Users, permission: 'patients.view' },
+      { title: 'Patients', href: '/patients', icon: Users, permission: 'patients.read' },
       {
         title: 'Therapists',
         href: '/therapists',
         icon: Stethoscope,
-        permission: 'therapists.view',
+        // Therapists see their own profile; everyone else with access sees the team.
+        permission: 'therapists.read_own',
       },
     ],
   },
@@ -108,6 +110,8 @@ export const segmentLabels: Record<string, string> = {
   'design-system': 'Design system',
   new: 'New',
   edit: 'Edit',
+  schedule: 'Schedule',
+  calendar: 'Calendar',
 };
 
 export function isActive(pathname: string, href: string) {

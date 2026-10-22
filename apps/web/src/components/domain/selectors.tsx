@@ -4,8 +4,8 @@ import * as React from 'react';
 
 import { SearchableSelect, type Option } from '@/components/forms/searchable-select';
 import { Avatar } from '@/components/ui/avatar';
-import { usePatient, usePatientSearch } from '@/lib/api/patients';
-import { useTherapists } from '@/lib/api/therapists';
+import { usePatient, usePatientSearch } from '@/lib/api/prototype-patients';
+import { useTherapists } from '@/lib/api/prototype-therapists';
 import { useDebounced } from '@/lib/hooks/use-debounced';
 import { formatPhone } from '@/lib/format';
 import type { ID } from '@/lib/types';

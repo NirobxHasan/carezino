@@ -94,16 +94,19 @@ export interface DateRangeValue {
 export function DateRangePicker({
   value,
   onChange,
+  placeholder = 'Any date',
   className,
 }: {
-  value: DateRangeValue;
+  /** Null shows the placeholder, e.g. for an optional filter */
+  value: DateRangeValue | null;
   onChange: (value: DateRangeValue) => void;
+  placeholder?: string;
   className?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<DateRange | undefined>();
-  const from = parseISO(value.from);
-  const to = parseISO(value.to);
+  const from = value ? parseISO(value.from) : undefined;
+  const to = value ? parseISO(value.to) : undefined;
 
   const presets = React.useMemo(() => {
     const now = new Date();
@@ -127,16 +130,18 @@ export function DateRangePicker({
   }, [open]);
 
   const label =
-    toIso(from) === toIso(to)
-      ? format(from, 'd MMM yyyy')
-      : `${format(from, 'd MMM')} – ${format(to, 'd MMM yyyy')}`;
+    !from || !to
+      ? placeholder
+      : toIso(from) === toIso(to)
+        ? format(from, 'd MMM yyyy')
+        : `${format(from, 'd MMM')} – ${format(to, 'd MMM yyyy')}`;
 
   return (
     <Popover
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        setDraft(o ? { from, to } : undefined);
+        setDraft(o && from ? { from, to } : undefined);
       }}
     >
       <PopoverTrigger asChild>
@@ -145,6 +150,7 @@ export function DateRangePicker({
           className={cn(
             inputBaseClass,
             'flex h-9 w-auto items-center gap-2 px-3 text-left text-[13px]',
+            !value && 'text-muted-foreground',
             className,
           )}
           aria-label={`Date range: ${label}`}

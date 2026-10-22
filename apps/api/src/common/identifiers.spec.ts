@@ -1,8 +1,29 @@
 import { centerCodePrefix } from '../centers/centers.service';
-import { normalizeEmail, normalizeMobile, normalizePhone } from './identifiers';
+import {
+  normalizeAnyMobile,
+  normalizeEmail,
+  normalizeMobile,
+  normalizePhone,
+} from './identifiers';
 import { hashToken, generateToken } from './tokens';
 
 describe('identifier normalization', () => {
+  it.each([
+    ['01712-345678', '01712345678'],
+    ['+880 1712 345678', '01712345678'],
+    ['+44 7700 900123', '+447700900123'],
+    ['0044 7700 900123', '+447700900123'],
+  ])('accepts mobile %s from home or abroad', (input, expected) => {
+    expect(normalizeAnyMobile(input)).toBe(expected);
+  });
+
+  it.each(['01212345678', '+880123', '7700900123', '+0123456789', 'call me'])(
+    'rejects %s as a mobile number',
+    (input) => {
+      expect(normalizeAnyMobile(input)).toBeNull();
+    },
+  );
+
   it('lower-cases and trims emails', () => {
     expect(normalizeEmail('  Nadia@Example.COM ')).toBe('nadia@example.com');
   });

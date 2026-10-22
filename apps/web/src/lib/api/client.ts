@@ -38,6 +38,8 @@ export class ApiError extends Error {
     public readonly code?: string,
     /** Field path → message, e.g. { 'owner.email': 'Already registered' } */
     public readonly errors?: Record<string, string>,
+    /** Structured data some codes carry, e.g. the conflicts behind a 409 */
+    public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -99,16 +101,18 @@ export async function request<T>(
       message?: string | string[];
       code?: string;
       errors?: Record<string, string>;
-    };
-    const message = Array.isArray(body.message) ? body.message[0] : body.message;
+    } & Record<string, unknown>;
+    const { message: raw, code, errors, ...details } = body;
+    const message = Array.isArray(raw) ? raw[0] : raw;
     throw new ApiError(
       message ??
         (res.status >= 500
           ? 'Something went wrong on our side. Please try again.'
           : res.statusText),
       res.status,
-      body.code,
-      body.errors,
+      code,
+      errors,
+      details,
     );
   }
   if (res.status === 204) return undefined as T;

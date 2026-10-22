@@ -130,7 +130,7 @@ describe('Therapy types and center settings (e2e)', () => {
       const general = await admin.get('/settings/general');
       expect(general.body).toMatchObject({
         autoGeneratePatientCode: true,
-        defaultPatientStatus: 'ACTIVE',
+        defaultPatientStatus: 'NEW',
       });
     });
 
@@ -654,6 +654,8 @@ describe('Therapy types and center settings (e2e)', () => {
       }
       for (const body of [
         { defaultPatientStatus: 'DISCHARGED' },
+        // Patients can't be registered straight into inactive.
+        { defaultPatientStatus: 'INACTIVE' },
         { dateFormat: 'dd.mm.yy' },
         { weekStartsOn: 7 },
         { patientCodePrefix: 'TOO-LONG-PREFIX' },

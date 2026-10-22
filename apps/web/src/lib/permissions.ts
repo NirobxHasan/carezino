@@ -20,6 +20,32 @@ export const API_PERMISSIONS = [
   'therapy_types.delete',
   'center_settings.read',
   'center_settings.update',
+  'therapists.read',
+  'therapists.read_own',
+  'therapists.create',
+  'therapists.update',
+  'therapists.deactivate',
+  'therapists.delete',
+  'therapists.manage_availability',
+  'therapists.manage_time_off',
+  'patients.read',
+  'patients.create',
+  'patients.update',
+  'patients.change_status',
+  'patients.delete',
+  'guardians.read',
+  'guardians.create',
+  'guardians.update',
+  'guardians.unlink',
+  'appointments.read',
+  'appointments.read_own',
+  'appointments.create',
+  'appointments.update',
+  'appointments.reschedule',
+  'appointments.cancel',
+  'appointments.cancel_late',
+  'appointments.manage_status',
+  'appointments.manage_recurring',
 ] as const;
 
 export type ApiPermission = (typeof API_PERMISSIONS)[number];
@@ -27,12 +53,6 @@ export type ApiPermission = (typeof API_PERMISSIONS)[number];
 /** Permissions for prototype modules that aren't on the API yet. */
 export type ModulePermission =
   | 'dashboard.view'
-  | 'appointments.view'
-  | 'appointments.manage'
-  | 'patients.view'
-  | 'patients.manage'
-  | 'therapists.view'
-  | 'therapists.manage'
   | 'clinical.view'
   | 'clinical.write'
   | 'packages.view'
@@ -45,12 +65,6 @@ export type Permission = ApiPermission | ModulePermission;
 
 const ALL_MODULES: ModulePermission[] = [
   'dashboard.view',
-  'appointments.view',
-  'appointments.manage',
-  'patients.view',
-  'patients.manage',
-  'therapists.view',
-  'therapists.manage',
   'clinical.view',
   'clinical.write',
   'packages.view',
@@ -67,26 +81,8 @@ const ALL_MODULES: ModulePermission[] = [
 export const modulePermissions: Record<Role, ModulePermission[]> = {
   CENTER_ADMIN: ALL_MODULES,
   MANAGER: ALL_MODULES,
-  RECEPTIONIST: [
-    'dashboard.view',
-    'appointments.view',
-    'appointments.manage',
-    'patients.view',
-    'patients.manage',
-    'therapists.view',
-    'packages.view',
-    'finance.view',
-    'finance.manage',
-  ],
-  THERAPIST: [
-    'dashboard.view',
-    'appointments.view',
-    'patients.view',
-    'therapists.view',
-    'clinical.view',
-    'clinical.write',
-    'packages.view',
-  ],
+  RECEPTIONIST: ['dashboard.view', 'packages.view', 'finance.view', 'finance.manage'],
+  THERAPIST: ['dashboard.view', 'clinical.view', 'clinical.write', 'packages.view'],
 };
 
 export const ROLES: Role[] = ['CENTER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'THERAPIST'];

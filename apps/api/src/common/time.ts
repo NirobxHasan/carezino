@@ -54,3 +54,57 @@ export function todayIn(timeZone: string, now = new Date()) {
 export function daysInclusive(start: Date, end: Date) {
   return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
 }
+
+const DAY_MS = 86_400_000;
+
+/** A UTC-midnight date plus whole days. */
+export function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+/** Minutes the zone is ahead of UTC at that instant, e.g. 360 for Asia/Dhaka. */
+function zoneOffsetMinutes(timeZone: string, instant: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(instant);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)!.value);
+  const asUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour'),
+    get('minute'),
+    get('second'),
+  );
+  return Math.round(
+    (asUtc - Math.floor(instant.getTime() / 1000) * 1000) / 60_000,
+  );
+}
+
+/**
+ * The instant a wall-clock time happens in a zone: `date` is a UTC-midnight calendar
+ * date (as from parseIsoDate) and `minutes` the time of day; 1440 means the next midnight.
+ */
+export function zonedToInstant(date: Date, minutes: number, timeZone: string) {
+  const wall = date.getTime() + minutes * 60_000;
+  const first = wall - zoneOffsetMinutes(timeZone, new Date(wall)) * 60_000;
+  // Re-check at the result, in case the offset changes in between (DST).
+  const offset = zoneOffsetMinutes(timeZone, new Date(first));
+  return new Date(wall - offset * 60_000);
+}
+
+/** An instant as a calendar date (UTC-midnight Date) and minutes since midnight in a zone. */
+export function instantToZoned(instant: Date, timeZone: string) {
+  const local =
+    instant.getTime() + zoneOffsetMinutes(timeZone, instant) * 60_000;
+  const date = new Date(Math.floor(local / DAY_MS) * DAY_MS);
+  return { date, minutes: Math.round((local - date.getTime()) / 60_000) };
+}

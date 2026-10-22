@@ -1,372 +1,267 @@
 'use client';
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, addMinutes, areIntervalsOverlapping, parseISO } from 'date-fns';
 
 import type {
-  Appointment,
-  AppointmentStatus,
-  BookingRequest,
-  ID,
+  AppointmentCalendar,
+  AppointmentDetail,
+  AppointmentItem,
+  AppointmentRecordStatus,
+  AppointmentSeries,
+  AppointmentType,
+  AvailableSlots,
+  CancellationReason,
+  ClockTime,
   ISODate,
-  TimeSlot,
+  Paginated,
+  SeriesFrequency,
+  SeriesOccurrence,
+  SeriesPreview,
 } from '../types';
-import type { MockDb } from '../mock/seed';
-import { backend, clone, latency, uid } from './client';
+import { request } from './client';
 import { keys } from './keys';
-import { patientRef, therapistRef, type PatientRef, type TherapistRef } from './refs';
-import { workingWindow } from './therapists';
-
-export type AppointmentWithRefs = Appointment & { patient: PatientRef; therapist: TherapistRef };
 
 export interface AppointmentListParams {
-  from?: string;
-  to?: string;
-  therapistIds?: ID[];
-  therapyTypeIds?: ID[];
-  patientId?: ID;
-  statuses?: AppointmentStatus[];
-  kind?: Appointment['kind'];
+  search?: string;
+  /** Center-local dates, both included */
+  from?: ISODate;
+  to?: ISODate;
+  therapistId?: string;
+  therapyTypeId?: string;
+  patientId?: string;
+  type?: AppointmentType;
+  status?: AppointmentRecordStatus[];
+  /** upcoming: from now on; past: started before now */
+  timeframe?: 'upcoming' | 'past';
+  /** By start time */
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
 }
 
-function withRefs(db: MockDb, a: Appointment): AppointmentWithRefs {
-  return { ...a, patient: patientRef(db, a.patientId), therapist: therapistRef(db, a.therapistId) };
-}
-
-export async function listAppointments(
-  params: AppointmentListParams = {},
-): Promise<AppointmentWithRefs[]> {
-  await latency();
-  const db = backend();
-  const from = params.from ? parseISO(params.from) : undefined;
-  const to = params.to ? parseISO(params.to) : undefined;
-  return clone(
-    db.appointments
-      .filter((a) => {
-        const start = parseISO(a.start);
-        if (from && start < from) return false;
-        if (to && start >= to) return false;
-        if (params.therapistIds?.length && !params.therapistIds.includes(a.therapistId))
-          return false;
-        if (params.therapyTypeIds?.length && !params.therapyTypeIds.includes(a.therapyTypeId))
-          return false;
-        if (params.patientId && a.patientId !== params.patientId) return false;
-        if (params.statuses?.length && !params.statuses.includes(a.status)) return false;
-        if (params.kind && a.kind !== params.kind) return false;
-        return true;
-      })
-      .sort((a, b) => a.start.localeCompare(b.start))
-      .map((a) => withRefs(db, a)),
-  );
-}
-
-export async function getAppointment(id: string): Promise<AppointmentWithRefs> {
-  await latency(150);
-  const db = backend();
-  const a = db.appointments.find((x) => x.id === id);
-  if (!a) throw new Error('Appointment not found');
-  return clone(withRefs(db, a));
-}
-
-// ── Availability & conflicts ────────────────────────────────────────────────
-
-const LUNCH = { start: 13, end: 14 };
-
-function findConflict(
-  db: MockDb,
-  {
-    therapistId,
-    patientId,
-    start,
-    end,
-    ignoreId,
-  }: {
-    therapistId: ID;
-    patientId?: ID;
-    start: Date;
-    end: Date;
-    ignoreId?: ID;
-  },
-): string | undefined {
-  const therapist = db.therapists.find((t) => t.id === therapistId);
-  if (!therapist) return 'Therapist not found';
-  const window = workingWindow(therapist, start);
-  if (!window) {
-    return therapist.status === 'on_leave'
-      ? `${therapist.name} is on leave`
-      : `${therapist.name} doesn't work on this day`;
-  }
-  if (start < window.start || end > window.end) return `Outside ${therapist.name}'s working hours`;
-  const lunchStart = new Date(start);
-  lunchStart.setHours(LUNCH.start, 0, 0, 0);
-  const lunchEnd = new Date(start);
-  lunchEnd.setHours(LUNCH.end, 0, 0, 0);
-  if (areIntervalsOverlapping({ start, end }, { start: lunchStart, end: lunchEnd })) {
-    return 'Lunch break';
-  }
-  for (const a of db.appointments) {
-    if (a.id === ignoreId || a.status === 'cancelled') continue;
-    const range = { start: parseISO(a.start), end: parseISO(a.end) };
-    if (!areIntervalsOverlapping({ start, end }, range)) continue;
-    if (a.therapistId === therapistId) {
-      return `${therapist.name.split(' ')[0]} is booked with ${patientRef(db, a.patientId).fullName}`;
-    }
-    if (patientId && a.patientId === patientId) {
-      return `Patient already has a ${therapistRef(db, a.therapistId).name.split(' ')[0]} session`;
-    }
-  }
-  return undefined;
+export interface CalendarParams {
+  startDate: ISODate;
+  endDate: ISODate;
+  therapistId?: string;
+  therapyTypeId?: string;
+  type?: AppointmentType;
+  status?: AppointmentRecordStatus[];
 }
 
 export interface SlotParams {
-  therapistId: ID;
+  therapistId: string;
+  therapyTypeId: string;
   date: ISODate;
   durationMinutes: number;
-  patientId?: ID;
-  ignoreAppointmentId?: ID;
+  patientId?: string;
+  excludeAppointmentId?: string;
 }
 
-export async function getAvailableSlots(params: SlotParams): Promise<TimeSlot[]> {
-  await latency(200);
-  const db = backend();
-  const therapist = db.therapists.find((t) => t.id === params.therapistId);
-  if (!therapist) return [];
-  const day = parseISO(params.date);
-  const window = workingWindow(therapist, day);
-  if (!window) return [];
-  const now = new Date();
-  const slots: TimeSlot[] = [];
-  for (
-    let start = window.start;
-    addMinutes(start, params.durationMinutes) <= window.end;
-    start = addMinutes(start, 30)
-  ) {
-    const end = addMinutes(start, params.durationMinutes);
-    const reason =
-      start < now
-        ? 'In the past'
-        : findConflict(db, {
-            therapistId: params.therapistId,
-            patientId: params.patientId,
-            start,
-            end,
-            ignoreId: params.ignoreAppointmentId,
-          });
-    slots.push({
-      start: start.toISOString(),
-      end: end.toISOString(),
-      available: !reason,
-      reason,
-    });
-  }
-  return slots;
+/** Who and what is booked, shared by single and recurring bookings */
+interface BookingInput {
+  patientId: string;
+  type: AppointmentType;
+  therapyTypeId: string;
+  therapistId: string;
+  durationMinutes: number;
+  internalNotes?: string;
+  /** Book over clashes with other appointments where the center allows double booking */
+  allowOverlap?: boolean;
 }
 
-export interface Occurrence {
-  start: string;
-  end: string;
-  conflict?: string;
+export interface CreateAppointmentInput extends BookingInput {
+  date: ISODate;
+  startTime: ClockTime;
 }
 
-function expandOccurrences(req: BookingRequest): { start: Date; end: Date }[] {
-  const first = parseISO(req.start);
-  const make = (d: Date) => ({ start: d, end: addMinutes(d, req.durationMinutes) });
-  if (req.recurrence.frequency === 'none') return [make(first)];
-  const weekdays = req.recurrence.weekdays.length ? req.recurrence.weekdays : [first.getDay()];
-  const out: { start: Date; end: Date }[] = [];
-  for (let i = 0; out.length < req.recurrence.occurrences && i < 7 * 52; i++) {
-    const d = addDays(first, i);
-    if (weekdays.includes(d.getDay())) out.push(make(d));
-  }
-  return out;
-}
-
-export async function previewBooking(req: BookingRequest): Promise<Occurrence[]> {
-  await latency(200);
-  const db = backend();
-  return expandOccurrences(req).map(({ start, end }) => ({
-    start: start.toISOString(),
-    end: end.toISOString(),
-    conflict: findConflict(db, {
-      therapistId: req.therapistId,
-      patientId: req.patientId,
-      start,
-      end,
-    }),
-  }));
-}
-
-export async function bookAppointments(
-  req: BookingRequest,
-): Promise<{ created: Appointment[]; skipped: Occurrence[] }> {
-  await latency(600);
-  const db = backend();
-  const occurrences = expandOccurrences(req);
-  const seriesId = occurrences.length > 1 ? uid('ser') : undefined;
-  const pkg = req.patientPackageId
-    ? db.patientPackages.find((p) => p.id === req.patientPackageId)
-    : undefined;
-  const created: Appointment[] = [];
-  const skipped: Occurrence[] = [];
-
-  for (const { start, end } of occurrences) {
-    const conflict = findConflict(db, {
-      therapistId: req.therapistId,
-      patientId: req.patientId,
-      start,
-      end,
-    });
-    if (conflict) {
-      skipped.push({ start: start.toISOString(), end: end.toISOString(), conflict });
-      continue;
-    }
-    const remaining = pkg ? pkg.totalSessions - pkg.usedSessions - pkg.scheduledSessions : 0;
-    const appointment: Appointment = {
-      id: uid('ap'),
-      patientId: req.patientId,
-      therapistId: req.therapistId,
-      therapyTypeId: req.therapyTypeId,
-      kind: req.kind,
-      start: start.toISOString(),
-      end: end.toISOString(),
-      status: 'scheduled',
-      patientPackageId: pkg && remaining > 0 ? pkg.id : undefined,
-      seriesId,
-      noteStatus: 'none',
-      notes: req.notes,
-    };
-    if (appointment.patientPackageId && pkg) pkg.scheduledSessions++;
-    db.appointments.push(appointment);
-    created.push(appointment);
-  }
-  if (!created.length) {
-    throw new Error('None of the selected times are available. Pick another time.');
-  }
-  return clone({ created, skipped });
-}
-
-function adjustPackage(db: MockDb, a: Appointment, from: AppointmentStatus, to: AppointmentStatus) {
-  const pkg = a.patientPackageId && db.patientPackages.find((p) => p.id === a.patientPackageId);
-  if (!pkg) return;
-  const counts = (s: AppointmentStatus) =>
-    s === 'completed' || s === 'no_show' ? 'used' : s === 'cancelled' ? 'none' : 'scheduled';
-  const before = counts(from);
-  const after = counts(to);
-  if (before === after) return;
-  if (before === 'used') pkg.usedSessions--;
-  if (before === 'scheduled') pkg.scheduledSessions--;
-  if (after === 'used') pkg.usedSessions++;
-  if (after === 'scheduled') pkg.scheduledSessions++;
-  if (pkg.usedSessions >= pkg.totalSessions && pkg.status === 'active') pkg.status = 'completed';
-}
-
-export async function updateAppointmentStatus({
-  id,
-  status,
-  reason,
-}: {
-  id: ID;
-  status: AppointmentStatus;
+export interface RescheduleInput {
+  date: ISODate;
+  startTime: ClockTime;
+  durationMinutes?: number;
+  therapistId?: string;
+  therapyTypeId?: string;
   reason?: string;
-}) {
-  await latency(350);
-  const db = backend();
-  const a = db.appointments.find((x) => x.id === id);
-  if (!a) throw new Error('Appointment not found');
-  adjustPackage(db, a, a.status, status);
-  a.status = status;
-  if (status === 'cancelled') a.cancelReason = reason;
-  return clone(a);
+  allowOverlap?: boolean;
 }
 
-export async function rescheduleAppointment({
-  id,
-  start,
-  therapistId,
-}: {
-  id: ID;
-  start: string;
-  therapistId?: ID;
-}) {
-  await latency(450);
-  const db = backend();
-  const a = db.appointments.find((x) => x.id === id);
-  if (!a) throw new Error('Appointment not found');
-  const duration = (parseISO(a.end).getTime() - parseISO(a.start).getTime()) / 60000;
-  const newStart = parseISO(start);
-  const newEnd = addMinutes(newStart, duration);
-  const conflict = findConflict(db, {
-    therapistId: therapistId ?? a.therapistId,
-    patientId: a.patientId,
-    start: newStart,
-    end: newEnd,
-    ignoreId: a.id,
-  });
-  if (conflict) throw new Error(conflict);
-  a.start = newStart.toISOString();
-  a.end = newEnd.toISOString();
-  if (therapistId) a.therapistId = therapistId;
-  return clone(a);
+export interface CancelInput {
+  reason: CancellationReason;
+  note?: string;
 }
+
+export interface SeriesInput extends BookingInput {
+  startTime: ClockTime;
+  recurrence: {
+    frequency: SeriesFrequency;
+    interval: number;
+    daysOfWeek?: number[];
+    startDate: ISODate;
+    endType: 'UNTIL' | 'COUNT';
+    until?: ISODate;
+    count?: number;
+  };
+}
+
+export type StatusChange = 'CONFIRMED' | 'COMPLETED' | 'NO_SHOW';
+
+function query(params: object) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === '' || value === null) continue;
+    if (Array.isArray(value)) {
+      if (value.length) q.set(key, value.join(','));
+    } else {
+      q.set(key, String(value));
+    }
+  }
+  return q.toString();
+}
+
+const path = (id: string) => `/appointments/${encodeURIComponent(id)}`;
+
+export const appointmentsApi = {
+  list: (params: AppointmentListParams) =>
+    request<Paginated<AppointmentItem>>(
+      `/appointments?${query({ ...params, page: params.page ?? 1, pageSize: params.pageSize ?? 20 })}`,
+    ),
+  calendar: (params: CalendarParams) =>
+    request<AppointmentCalendar>(`/appointments/calendar?${query(params)}`),
+  get: (id: string) => request<AppointmentDetail>(path(id)),
+  slots: (params: SlotParams) =>
+    request<AvailableSlots>(`/appointments/available-slots?${query(params)}`),
+  create: (input: CreateAppointmentInput) =>
+    request<AppointmentDetail>('/appointments', { method: 'POST', body: input }),
+  update: (id: string, input: { type?: AppointmentType; internalNotes?: string }) =>
+    request<AppointmentDetail>(path(id), { method: 'PATCH', body: input }),
+  reschedule: (id: string, input: RescheduleInput) =>
+    request<AppointmentDetail>(`${path(id)}/reschedule`, { method: 'PATCH', body: input }),
+  cancel: (id: string, input: CancelInput) =>
+    request<AppointmentDetail>(`${path(id)}/cancel`, { method: 'PATCH', body: input }),
+  setStatus: (id: string, status: StatusChange) =>
+    request<AppointmentDetail>(`${path(id)}/status`, { method: 'PATCH', body: { status } }),
+  previewSeries: (input: SeriesInput) =>
+    request<SeriesPreview>('/appointment-series/preview', { method: 'POST', body: input }),
+  createSeries: (input: SeriesInput & { skipConflicts?: boolean }) =>
+    request<{ series: AppointmentSeries; created: number; skipped: SeriesOccurrence[] }>(
+      '/appointment-series',
+      { method: 'POST', body: input },
+    ),
+  getSeries: (id: string) =>
+    request<AppointmentSeries>(`/appointment-series/${encodeURIComponent(id)}`),
+  cancelSeries: (id: string, input: CancelInput & { fromAppointmentId?: string }) =>
+    request<{ cancelled: number; series: AppointmentSeries }>(
+      `/appointment-series/${encodeURIComponent(id)}/cancel-future`,
+      { method: 'POST', body: input },
+    ),
+};
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
+// Every write invalidates the ['appointments'] prefix (lists, calendars, slots, details)
+// and ['therapists'], whose schedules and upcoming counts include appointments.
 
-export function useAppointments(params: AppointmentListParams, enabled = true) {
+export function useAppointmentList(params: AppointmentListParams, enabled = true) {
   return useQuery({
-    queryKey: keys.appointments(params),
-    queryFn: () => listAppointments(params),
+    queryKey: keys.appointmentList(params),
+    queryFn: () => appointmentsApi.list(params),
     placeholderData: keepPreviousData,
     enabled,
   });
 }
 
+export function useAppointmentCalendar(params: CalendarParams) {
+  return useQuery({
+    queryKey: keys.appointmentCalendar(params),
+    queryFn: () => appointmentsApi.calendar(params),
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useAppointment(id: string | undefined) {
   return useQuery({
-    queryKey: keys.appointment(id ?? ''),
-    queryFn: () => getAppointment(id!),
+    queryKey: keys.appointmentDetail(id ?? ''),
+    queryFn: () => appointmentsApi.get(id!),
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+/** Slots go stale fast: always refetch on mount so a picked time was free recently. */
+export function useAvailableSlots(params: SlotParams | null) {
+  return useQuery({
+    queryKey: keys.availableSlots(params ?? {}),
+    queryFn: () => appointmentsApi.slots(params!),
+    enabled: Boolean(params),
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+export function useSeriesPreview(input: SeriesInput | null) {
+  return useQuery({
+    queryKey: keys.seriesPreview(input ?? {}),
+    queryFn: () => appointmentsApi.previewSeries(input!),
+    enabled: Boolean(input),
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+export function useAppointmentSeries(id: string | undefined) {
+  return useQuery({
+    queryKey: keys.appointmentSeries(id ?? ''),
+    queryFn: () => appointmentsApi.getSeries(id!),
     enabled: Boolean(id),
   });
 }
 
-export function useAvailableSlots(params: SlotParams | null) {
-  return useQuery({
-    queryKey: keys.slots(params ?? {}),
-    queryFn: () => getAvailableSlots(params!),
-    enabled: Boolean(params),
-  });
-}
-
-export function useBookingPreview(req: BookingRequest | null) {
-  return useQuery({
-    queryKey: ['appointments', 'preview', req],
-    queryFn: () => previewBooking(req!),
-    enabled: Boolean(req),
-  });
-}
-
-function invalidateScheduling(qc: ReturnType<typeof useQueryClient>) {
-  for (const key of ['appointments', 'patient-packages', 'dashboard', 'therapists', 'notes']) {
-    qc.invalidateQueries({ queryKey: [key] });
-  }
-}
-
-export function useBookAppointments() {
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: bookAppointments, onSuccess: () => invalidateScheduling(qc) });
-}
-
-export function useUpdateAppointmentStatus() {
+function useAppointmentMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: updateAppointmentStatus,
-    onSuccess: () => invalidateScheduling(qc),
+    mutationFn: fn,
+    onSettled: () => {
+      // Also after failures: a 409 means someone else's booking changed what's free.
+      void qc.invalidateQueries({ queryKey: ['appointments'] });
+      void qc.invalidateQueries({ queryKey: ['therapists'] });
+    },
   });
+}
+
+export function useCreateAppointment() {
+  return useAppointmentMutation(appointmentsApi.create);
+}
+
+export function useUpdateAppointment() {
+  return useAppointmentMutation(
+    (v: { id: string; input: { type?: AppointmentType; internalNotes?: string } }) =>
+      appointmentsApi.update(v.id, v.input),
+  );
 }
 
 export function useRescheduleAppointment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: rescheduleAppointment,
-    onSuccess: () => invalidateScheduling(qc),
-  });
+  return useAppointmentMutation((v: { id: string; input: RescheduleInput }) =>
+    appointmentsApi.reschedule(v.id, v.input),
+  );
+}
+
+export function useCancelAppointment() {
+  return useAppointmentMutation((v: { id: string; input: CancelInput }) =>
+    appointmentsApi.cancel(v.id, v.input),
+  );
+}
+
+export function useSetAppointmentStatus() {
+  return useAppointmentMutation((v: { id: string; status: StatusChange }) =>
+    appointmentsApi.setStatus(v.id, v.status),
+  );
+}
+
+export function useCreateSeries() {
+  return useAppointmentMutation(appointmentsApi.createSeries);
+}
+
+export function useCancelSeries() {
+  return useAppointmentMutation(
+    (v: { id: string; input: CancelInput & { fromAppointmentId?: string } }) =>
+      appointmentsApi.cancelSeries(v.id, v.input),
+  );
 }

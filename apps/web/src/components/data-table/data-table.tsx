@@ -41,6 +41,9 @@ interface ServerPagination {
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  /** Offer these page sizes; needs onPageSizeChange */
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (pageSize: number) => void;
 }
 
 export function DataTable<T>({

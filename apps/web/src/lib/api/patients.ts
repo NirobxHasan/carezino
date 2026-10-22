@@ -1,148 +1,267 @@
 'use client';
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 
-import type { Paginated, Patient, PatientStatus } from '../types';
-import { backend, clone, latency, uid } from './client';
+import type {
+  ConsentPurpose,
+  ContactType,
+  GuardianProfile,
+  GuardianContactType,
+  GuardianMatch,
+  GuardianRelationship,
+  Paginated,
+  PatientDetail,
+  PatientGender,
+  PatientRecordStatus,
+  PatientSummary,
+  ReferralSource,
+} from '../types';
+import { request } from './client';
 import { keys } from './keys';
-import { therapistRef, type TherapistRef } from './refs';
+
+export type PatientSortField = 'registeredAt' | 'fullName' | 'code';
 
 export interface PatientListParams {
   search?: string;
-  status?: PatientStatus | 'all';
+  status?: PatientRecordStatus | 'all';
   therapyTypeId?: string | 'all';
-  sort?: { id: 'fullName' | 'code' | 'registeredAt'; desc: boolean };
+  gender?: PatientGender | 'all';
+  /** Center-local dates, both included */
+  registeredFrom?: string;
+  registeredTo?: string;
+  sortBy?: PatientSortField;
+  sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }
 
-export type PatientListItem = Patient & { primaryTherapist?: TherapistRef };
-
-export async function listPatients(
-  params: PatientListParams = {},
-): Promise<Paginated<PatientListItem>> {
-  await latency();
-  const db = backend();
-  const { search, status = 'all', therapyTypeId = 'all', page = 1, pageSize = 10, sort } = params;
-  const q = search?.trim().toLowerCase();
-  let rows = db.patients.filter((p) => {
-    if (status !== 'all' && p.status !== status) return false;
-    if (therapyTypeId !== 'all' && !p.therapyTypeIds.includes(therapyTypeId)) return false;
-    if (!q) return true;
-    return (
-      p.fullName.toLowerCase().includes(q) ||
-      p.code.toLowerCase().includes(q) ||
-      p.guardian.name.toLowerCase().includes(q) ||
-      p.guardian.phone.includes(q.replace(/\D/g, '') || q) ||
-      (p.nameBn?.includes(search!.trim()) ?? false)
-    );
-  });
-  const by = sort?.id ?? 'registeredAt';
-  const dir = sort ? (sort.desc ? -1 : 1) : -1;
-  rows = [...rows].sort((a, b) => (a[by] < b[by] ? -dir : a[by] > b[by] ? dir : 0));
-  const total = rows.length;
-  const items = rows.slice((page - 1) * pageSize, page * pageSize).map((p) => ({
-    ...p,
-    primaryTherapist: p.primaryTherapistId ? therapistRef(db, p.primaryTherapistId) : undefined,
-  }));
-  return clone({ items, total, page, pageSize });
+/** Without a date of birth: stored as of the day it's saved */
+export interface ApproximateAgeInput {
+  years: number;
+  months?: number;
 }
 
-/** Lightweight search used by PatientSelector. */
-export async function searchPatients(query: string) {
-  const result = await listPatients({ search: query, pageSize: 20 });
-  return result.items.filter((p) => p.status !== 'discharged');
+/** A guardian's own details; on links to an existing guardian (guardianId) they're ignored. */
+export interface GuardianDetailsInput {
+  fullName?: string;
+  mobile?: string;
+  secondaryMobile?: string;
+  email?: string;
+  address?: string;
 }
 
-export async function getPatient(id: string): Promise<PatientListItem> {
-  await latency();
-  const db = backend();
-  const p = db.patients.find((x) => x.id === id);
-  if (!p) throw new Error('Patient not found');
-  return clone({
-    ...p,
-    primaryTherapist: p.primaryTherapistId ? therapistRef(db, p.primaryTherapistId) : undefined,
-  });
+export interface RelationshipInput {
+  relationship?: GuardianRelationship;
+  customRelationship?: string;
+  isEmergencyContact?: boolean;
 }
 
-export type PatientInput = Omit<Patient, 'id' | 'code' | 'registeredAt'>;
+export interface RegistrationContactInput extends GuardianDetailsInput, RelationshipInput {
+  contactType: ContactType;
+  guardianId?: string;
+}
 
-export async function createPatient(input: PatientInput): Promise<Patient> {
-  await latency(500);
-  const db = backend();
-  const duplicate = db.patients.find(
-    (p) =>
-      p.fullName.toLowerCase() === input.fullName.toLowerCase() &&
-      p.dateOfBirth === input.dateOfBirth,
-  );
-  if (duplicate) {
-    throw new Error(
-      `A patient with this name and date of birth already exists (${duplicate.code}).`,
-    );
+/** Optional fields: an empty string or null clears them on update. */
+export interface PatientInput {
+  fullName: string;
+  dateOfBirth?: string | null;
+  approximateAge?: ApproximateAgeInput | null;
+  gender?: PatientGender | '';
+  primaryConcern?: string;
+  therapyTypeIds?: string[];
+  photoUrl?: string;
+  /** Only when the center types its own codes */
+  code?: string;
+  emergencyPhone?: string;
+  referralSource?: ReferralSource | '';
+  referralOther?: string;
+  internalNotes?: string;
+}
+
+export interface CreatePatientInput extends PatientInput {
+  status?: PatientRecordStatus;
+  contact: RegistrationContactInput;
+  consents?: { purpose: ConsentPurpose; version?: string }[];
+}
+
+export interface UpdatePatientInput extends Partial<PatientInput> {
+  /** The patient's own contact details */
+  mobile?: string;
+  secondaryMobile?: string;
+  email?: string;
+  address?: string;
+}
+
+export interface LinkGuardianInput extends GuardianDetailsInput, RelationshipInput {
+  contactType: GuardianContactType;
+  guardianId?: string;
+  isPrimary?: boolean;
+}
+
+export interface UpdateLinkInput {
+  contactType?: GuardianContactType;
+  relationship?: GuardianRelationship;
+  customRelationship?: string | null;
+  isEmergencyContact?: boolean;
+}
+
+export interface ConsentInput {
+  purpose: ConsentPurpose;
+  granted: boolean;
+  givenBy: 'SELF' | 'GUARDIAN';
+  guardianId?: string;
+  version?: string;
+  note?: string;
+}
+
+function query(params: PatientListParams) {
+  const q = new URLSearchParams();
+  if (params.search?.trim()) q.set('search', params.search.trim());
+  for (const key of ['status', 'therapyTypeId', 'gender'] as const) {
+    const value = params[key];
+    if (value && value !== 'all') q.set(key, value);
   }
-  const next = Math.max(...db.patients.map((p) => Number(p.code.slice(3)))) + 1;
-  const patient: Patient = {
-    ...input,
-    id: uid('pt'),
-    code: `CZ-${String(next).padStart(4, '0')}`,
-    registeredAt: format(new Date(), 'yyyy-MM-dd'),
-  };
-  db.patients.push(patient);
-  return clone(patient);
+  if (params.registeredFrom) q.set('registeredFrom', params.registeredFrom);
+  if (params.registeredTo) q.set('registeredTo', params.registeredTo);
+  if (params.sortBy) q.set('sortBy', params.sortBy);
+  if (params.sortOrder) q.set('sortOrder', params.sortOrder);
+  q.set('page', String(params.page ?? 1));
+  q.set('pageSize', String(params.pageSize ?? 20));
+  return q.toString();
 }
 
-export async function updatePatient(id: string, input: Partial<PatientInput>): Promise<Patient> {
-  await latency(400);
-  const db = backend();
-  const p = db.patients.find((x) => x.id === id);
-  if (!p) throw new Error('Patient not found');
-  Object.assign(p, input);
-  return clone(p);
-}
+const path = (id: string) => `/patients/${encodeURIComponent(id)}`;
+
+export const patientsApi = {
+  list: (params: PatientListParams) =>
+    request<Paginated<PatientSummary>>(`/patients?${query(params)}`),
+  get: (id: string) => request<PatientDetail>(path(id)),
+  create: (input: CreatePatientInput) =>
+    request<PatientDetail>('/patients', { method: 'POST', body: input }),
+  update: (id: string, input: UpdatePatientInput) =>
+    request<PatientDetail>(path(id), { method: 'PATCH', body: input }),
+  setStatus: (id: string, status: Exclude<PatientRecordStatus, 'NEW'>) =>
+    request<PatientDetail>(`${path(id)}/status`, { method: 'PATCH', body: { status } }),
+  remove: (id: string) => request<void>(path(id), { method: 'DELETE' }),
+  link: (id: string, input: LinkGuardianInput) =>
+    request<PatientDetail>(`${path(id)}/guardians`, { method: 'POST', body: input }),
+  updateLink: (id: string, relationId: string, input: UpdateLinkInput) =>
+    request<PatientDetail>(`${path(id)}/guardians/${encodeURIComponent(relationId)}`, {
+      method: 'PATCH',
+      body: input,
+    }),
+  unlink: (id: string, relationId: string) =>
+    request<PatientDetail>(`${path(id)}/guardians/${encodeURIComponent(relationId)}`, {
+      method: 'DELETE',
+    }),
+  setPrimary: (id: string, target: { relationId: string } | { self: true }) =>
+    request<PatientDetail>(`${path(id)}/primary-contact`, { method: 'PUT', body: target }),
+  recordConsent: (id: string, input: ConsentInput) =>
+    request<PatientDetail>(`${path(id)}/consents`, { method: 'POST', body: input }),
+  searchGuardians: (q: string) =>
+    request<GuardianMatch[]>(`/guardians/search?q=${encodeURIComponent(q)}`),
+  updateGuardian: (guardianId: string, input: GuardianDetailsInput) =>
+    request<GuardianProfile>(`/guardians/${encodeURIComponent(guardianId)}`, {
+      method: 'PATCH',
+      body: input,
+    }),
+};
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
+// Every write invalidates the whole ['patients'] prefix: a contact change shows in the
+// list's primary contact, and a guardian edit in every patient they're linked to.
 
-export function usePatients(params: PatientListParams) {
+export function usePatientList(params: PatientListParams, enabled = true) {
   return useQuery({
-    queryKey: keys.patients(params),
-    queryFn: () => listPatients(params),
+    queryKey: keys.patientList(params),
+    queryFn: () => patientsApi.list(params),
     placeholderData: keepPreviousData,
-  });
-}
-
-export function usePatientSearch(query: string, enabled = true) {
-  return useQuery({
-    queryKey: ['patients', 'search', query],
-    queryFn: () => searchPatients(query),
     enabled,
-    placeholderData: keepPreviousData,
   });
 }
 
 export function usePatient(id: string | undefined) {
   return useQuery({
     queryKey: keys.patient(id ?? ''),
-    queryFn: () => getPatient(id!),
+    queryFn: () => patientsApi.get(id!),
     enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+/** Guardians matching a mobile (4+ digits) or name (2+ letters); off below that. */
+export function useGuardianSearch(q: string, enabled = true) {
+  const term = q.trim();
+  const digits = term.replace(/[\s\-().+]/g, '');
+  const long = /^\d+$/.test(digits) ? digits.length >= 4 : term.length >= 2;
+  return useQuery({
+    queryKey: keys.guardianSearch(term),
+    queryFn: () => patientsApi.searchGuardians(term),
+    enabled: enabled && long,
+    placeholderData: keepPreviousData,
+  });
+}
+
+function usePatientMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['patients'] }),
   });
 }
 
 export function useCreatePatient() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: createPatient,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['patients'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
-    },
-  });
+  return usePatientMutation(patientsApi.create);
 }
 
-export function useUpdatePatient(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: Partial<PatientInput>) => updatePatient(id, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['patients'] }),
-  });
+export function useUpdatePatient() {
+  return usePatientMutation((v: { id: string; input: UpdatePatientInput }) =>
+    patientsApi.update(v.id, v.input),
+  );
+}
+
+export function useSetPatientStatus() {
+  return usePatientMutation((v: { id: string; status: Exclude<PatientRecordStatus, 'NEW'> }) =>
+    patientsApi.setStatus(v.id, v.status),
+  );
+}
+
+export function useDeletePatient() {
+  return usePatientMutation(patientsApi.remove);
+}
+
+export function useLinkGuardian() {
+  return usePatientMutation((v: { id: string; input: LinkGuardianInput }) =>
+    patientsApi.link(v.id, v.input),
+  );
+}
+
+export function useUpdateLink() {
+  return usePatientMutation((v: { id: string; relationId: string; input: UpdateLinkInput }) =>
+    patientsApi.updateLink(v.id, v.relationId, v.input),
+  );
+}
+
+export function useUnlinkGuardian() {
+  return usePatientMutation((v: { id: string; relationId: string }) =>
+    patientsApi.unlink(v.id, v.relationId),
+  );
+}
+
+export function useSetPrimaryContact() {
+  return usePatientMutation((v: { id: string; target: { relationId: string } | { self: true } }) =>
+    patientsApi.setPrimary(v.id, v.target),
+  );
+}
+
+export function useRecordConsent() {
+  return usePatientMutation((v: { id: string; input: ConsentInput }) =>
+    patientsApi.recordConsent(v.id, v.input),
+  );
+}
+
+export function useUpdateGuardian() {
+  return usePatientMutation((v: { guardianId: string; input: GuardianDetailsInput }) =>
+    patientsApi.updateGuardian(v.guardianId, v.input),
+  );
 }
