@@ -663,6 +663,8 @@ export interface AppointmentHistoryEntry {
 
 /** GET /appointments/:id */
 export interface AppointmentDetail extends AppointmentItem {
+  /** The assessment recording this booking, if any */
+  assessment: { id: ID; status: AssessmentRecordStatus } | null;
   bufferMinutes: number;
   internalNotes: string | null;
   cancellationNote: string | null;
@@ -988,6 +990,268 @@ export interface SessionNote {
   custom: FormValues;
   updatedAt: ISODateTime;
   submittedAt?: ISODateTime;
+}
+
+// ── Assessments (served by the API) ─────────────────────────────────────────
+// Templates are versioned forms (apps/api/src/assessments/engine.ts is the schema);
+// an assessment keeps the exact version it was filled in with.
+
+/** Why the assessment is done; the discipline is the therapy type */
+export type AssessmentKind = 'INITIAL' | 'FOLLOW_UP' | 'REASSESSMENT';
+export type AssessmentRecordStatus = 'DRAFT' | 'COMPLETED' | 'AMENDED';
+export type AssessmentTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+export type TemplateVersionStatus = 'DRAFT' | 'PUBLISHED' | 'SUPERSEDED';
+export type GoalPriority = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type TemplateFieldType =
+  'TEXT' | 'TEXTAREA' | 'NUMBER' | 'SINGLE_SELECT' | 'MULTI_SELECT' | 'RADIO' | 'CHECKBOX' | 'DATE';
+
+export interface TemplateFieldOption {
+  value: string;
+  label: string;
+}
+
+export interface TemplateFieldValidation {
+  minLength?: number;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  minSelections?: number;
+  maxSelections?: number;
+}
+
+/** TEXT/TEXTAREA/selects/DATE: string; NUMBER: number; MULTI_SELECT: string[]; CHECKBOX: true */
+export type AnswerValue = string | number | boolean | string[];
+export type Answers = Record<string, AnswerValue>;
+
+export interface TemplateField {
+  /** Stable identifier answers are stored under */
+  key: string;
+  type: TemplateFieldType;
+  label: string;
+  helpText?: string;
+  placeholder?: string;
+  required: boolean;
+  options?: TemplateFieldOption[];
+  defaultValue?: AnswerValue;
+  validation?: TemplateFieldValidation;
+}
+
+export interface TemplateSection {
+  key: string;
+  title: string;
+  description?: string;
+  fields: TemplateField[];
+}
+
+export interface TemplateDefinition {
+  sections: TemplateSection[];
+}
+
+type UserRef = { id: ID; fullName: string };
+type TherapyTypeRef = { id: ID; name: string; code: string; color: string | null };
+
+/** GET /assessment-templates */
+export interface AssessmentTemplateItem {
+  id: ID;
+  name: string;
+  description: string | null;
+  /** Null: any assessment type */
+  purpose: AssessmentKind | null;
+  status: AssessmentTemplateStatus;
+  therapyType: TherapyTypeRef & { isActive: boolean };
+  latestVersion: number;
+  published: { id: ID; version: number; publishedAt: ISODateTime; fieldCount: number } | null;
+  draft: { id: ID; version: number; updatedAt: ISODateTime } | null;
+  assessmentCount: number;
+  createdBy: UserRef;
+  archivedAt: ISODateTime | null;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  actions: {
+    edit: boolean;
+    startVersion: boolean;
+    discardDraft: boolean;
+    publish: boolean;
+    archive: boolean;
+    restore: boolean;
+  };
+}
+
+/** GET /assessment-templates/:id */
+export interface AssessmentTemplateDetail extends Omit<
+  AssessmentTemplateItem,
+  'draft' | 'published'
+> {
+  draft: (NonNullable<AssessmentTemplateItem['draft']> & { definition: TemplateDefinition }) | null;
+  published:
+    | (NonNullable<AssessmentTemplateItem['published']> & {
+        publishedBy: UserRef | null;
+        definition: TemplateDefinition;
+      })
+    | null;
+}
+
+/** GET /assessment-templates/:id/versions */
+export interface TemplateVersionItem {
+  id: ID;
+  version: number;
+  status: TemplateVersionStatus;
+  publishedAt: ISODateTime | null;
+  publishedBy: UserRef | null;
+  createdBy: UserRef;
+  createdAt: ISODateTime;
+  fieldCount: number;
+  assessmentCount: number;
+}
+
+export interface TemplateVersionDetail {
+  id: ID;
+  version: number;
+  status: TemplateVersionStatus;
+  definition: TemplateDefinition;
+  publishedAt: ISODateTime | null;
+  publishedBy: UserRef | null;
+  createdAt: ISODateTime;
+  template: { id: ID; name: string };
+}
+
+export interface AssessmentActions {
+  /** Open the clinical content, and print it */
+  view: boolean;
+  edit: boolean;
+  complete: boolean;
+  amend: boolean;
+  discard: boolean;
+}
+
+/** GET /assessments: who, when and where it stands; never clinical content */
+export interface AssessmentItem {
+  id: ID;
+  type: AssessmentKind;
+  status: AssessmentRecordStatus;
+  /** Center-local date */
+  assessmentDate: ISODate;
+  appointmentId: ID | null;
+  revision: number;
+  patient: { id: ID; code: string; fullName: string; photoUrl: string | null; isDeleted: boolean };
+  therapist: { id: ID; code: string; fullName: string; isDeleted: boolean; isYou: boolean };
+  therapyType: TherapyTypeRef;
+  template: { id: ID; name: string; versionId: ID; version: number };
+  completedAt: ISODateTime | null;
+  completedBy: UserRef | null;
+  amendmentCount: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  actions: AssessmentActions;
+}
+
+export type ClinicalSummaryKey =
+  | 'summary'
+  | 'keyFindings'
+  | 'strengths'
+  | 'areasOfDifficulty'
+  | 'clinicalImpression'
+  | 'followUpRecommendation'
+  | 'additionalRecommendations';
+
+export type ClinicalSummary = Record<ClinicalSummaryKey, string | null> & {
+  suggestedReviewDate: ISODate | null;
+};
+
+export interface AssessmentRecommendation {
+  therapyType: TherapyTypeRef;
+  sessionsPerWeek: number | null;
+  durationMinutes: number | null;
+  reviewAfterWeeks: number | null;
+  note: string | null;
+}
+
+export interface AssessmentGoal {
+  title: string;
+  description: string | null;
+  priority: GoalPriority | null;
+  targetReviewDate: ISODate | null;
+}
+
+export interface AssessmentContent {
+  answers: Answers;
+  clinicalSummary: ClinicalSummary;
+  recommendations: AssessmentRecommendation[];
+  goals: AssessmentGoal[];
+}
+
+export interface AssessmentAmendmentEntry {
+  number: number;
+  reason: string;
+  /** Labels of what changed, never values */
+  changedFields: string[];
+  amendedAt: ISODateTime;
+  amendedBy: UserRef;
+}
+
+interface AssessmentDetailBase extends AssessmentItem {
+  appointment: {
+    id: ID;
+    status: AppointmentRecordStatus;
+    date: ISODate;
+    startTime: ClockTime;
+    endTime: ClockTime;
+  } | null;
+  createdBy: UserRef;
+}
+
+/** GET /assessments/:id with clinical access */
+export interface AssessmentDetail extends AssessmentDetailBase {
+  clinicalAccess: true;
+  patient: AssessmentItem['patient'] & {
+    gender: PatientGender | null;
+    ageAtAssessment: PatientAge | null;
+    primaryConcern: string | null;
+    referralSource: ReferralSource | null;
+    referralOther: string | null;
+  };
+  therapist: AssessmentItem['therapist'] & {
+    designation: string | null;
+    qualifications: string | null;
+    registrationNumber: string | null;
+  };
+  template: AssessmentItem['template'] & {
+    description: string | null;
+    versionStatus: TemplateVersionStatus;
+  };
+  form: TemplateDefinition;
+  content: AssessmentContent;
+  amendments: AssessmentAmendmentEntry[];
+  updatedBy: UserRef | null;
+}
+
+/** GET /assessments/:id for callers who may only see that it exists */
+export interface AssessmentStatusDetail extends AssessmentDetailBase {
+  clinicalAccess: false;
+  form: null;
+  content: null;
+  amendments: [];
+  updatedBy: null;
+}
+
+/** GET /assessments/:id/amendments/:number: the content before that correction */
+export interface AssessmentAmendmentSnapshot extends AssessmentAmendmentEntry {
+  previousRevision: number;
+  previousContent: AssessmentContent & { type: AssessmentKind; assessmentDate: ISODate };
+  form: TemplateDefinition;
+}
+
+/** GET /assessments/patient-options */
+export interface AssessmentPatientOption {
+  id: ID;
+  code: string;
+  fullName: string;
+  photoUrl: string | null;
+  status: PatientRecordStatus;
+  gender: PatientGender | null;
+  age: PatientAge | null;
 }
 
 // ── Packages & billing ──────────────────────────────────────────────────────

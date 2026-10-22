@@ -48,7 +48,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <aside
           data-collapsed={collapsedPref}
           className={cn(
-            'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-200 md:flex',
+            'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-200 md:flex print:hidden',
             'md:w-(--sidebar-width-collapsed) lg:w-(--sidebar-width) lg:data-[collapsed=true]:w-(--sidebar-width-collapsed)',
           )}
         >
@@ -64,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex h-(--topbar-height) shrink-0 items-center gap-3 border-b border-border bg-surface/90 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/80 sm:px-6">
+          <header className="sticky top-0 z-30 flex h-(--topbar-height) print:hidden shrink-0 items-center gap-3 border-b border-border bg-surface/90 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/80 sm:px-6">
             <Button
               variant="ghost"
               size="icon"
@@ -87,7 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </header>
 
           <main id="main" tabIndex={-1} className="flex-1 outline-none">
-            <div className="mx-auto w-full max-w-(--content-max-width) px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+            <div className="mx-auto w-full max-w-(--content-max-width) px-4 py-6 sm:px-6 lg:px-8 lg:py-8 print:max-w-none print:p-0">
               {children}
             </div>
           </main>

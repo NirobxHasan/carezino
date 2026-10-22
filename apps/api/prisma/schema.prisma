@@ -35,25 +35,29 @@ model Center {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  memberships        CenterMembership[]
-  invitations        Invitation[]
-  auditLogs          AuditLog[]
-  sessions           Session[]
-  therapyTypes       TherapyType[]
-  workingHours       CenterWorkingHour[]
-  closures           CenterClosure[]
-  schedulingSettings CenterSchedulingSettings?
-  generalSettings    CenterGeneralSettings?
-  therapists         Therapist[]
-  therapistHours     TherapistAvailability[]
-  therapistTimeOff   TherapistTimeOff[]
-  sequences          CenterSequence[]
-  patients           Patient[]
-  guardians          Guardian[]
-  patientConsents    PatientConsent[]
-  appointmentSeries  AppointmentSeries[]
-  appointments       Appointment[]
-  appointmentHistory AppointmentHistory[]
+  memberships          CenterMembership[]
+  invitations          Invitation[]
+  auditLogs            AuditLog[]
+  sessions             Session[]
+  therapyTypes         TherapyType[]
+  workingHours         CenterWorkingHour[]
+  closures             CenterClosure[]
+  schedulingSettings   CenterSchedulingSettings?
+  generalSettings      CenterGeneralSettings?
+  therapists           Therapist[]
+  therapistHours       TherapistAvailability[]
+  therapistTimeOff     TherapistTimeOff[]
+  sequences            CenterSequence[]
+  patients             Patient[]
+  guardians            Guardian[]
+  patientConsents      PatientConsent[]
+  appointmentSeries    AppointmentSeries[]
+  appointments         Appointment[]
+  appointmentHistory   AppointmentHistory[]
+  assessmentTemplates  AssessmentTemplate[]
+  templateVersions     AssessmentTemplateVersion[]
+  assessments          Assessment[]
+  assessmentAmendments AssessmentAmendment[]
 }
 
 /// Per-center counters for human-readable numbers such as patient codes. A number is
@@ -94,18 +98,25 @@ model User {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
-  memberships           CenterMembership[]
-  sessions              Session[]
-  passwordResetTokens   PasswordResetToken[]
-  invitationsSent       Invitation[]         @relation("InvitedBy")
-  auditLogs             AuditLog[]
-  patientsRegistered    Patient[]            @relation("PatientRegisteredBy")
-  consentsRecorded      PatientConsent[]     @relation("ConsentRecordedBy")
-  appointmentsBooked    Appointment[]        @relation("AppointmentCreatedBy")
-  appointmentsUpdated   Appointment[]        @relation("AppointmentUpdatedBy")
-  appointmentsCancelled Appointment[]        @relation("AppointmentCancelledBy")
-  seriesBooked          AppointmentSeries[]  @relation("SeriesCreatedBy")
-  appointmentChanges    AppointmentHistory[] @relation("AppointmentChangedBy")
+  memberships               CenterMembership[]
+  sessions                  Session[]
+  passwordResetTokens       PasswordResetToken[]
+  invitationsSent           Invitation[]                @relation("InvitedBy")
+  auditLogs                 AuditLog[]
+  patientsRegistered        Patient[]                   @relation("PatientRegisteredBy")
+  consentsRecorded          PatientConsent[]            @relation("ConsentRecordedBy")
+  appointmentsBooked        Appointment[]               @relation("AppointmentCreatedBy")
+  appointmentsUpdated       Appointment[]               @relation("AppointmentUpdatedBy")
+  appointmentsCancelled     Appointment[]               @relation("AppointmentCancelledBy")
+  seriesBooked              AppointmentSeries[]         @relation("SeriesCreatedBy")
+  appointmentChanges        AppointmentHistory[]        @relation("AppointmentChangedBy")
+  templatesCreated          AssessmentTemplate[]        @relation("TemplateCreatedBy")
+  templateVersionsMade      AssessmentTemplateVersion[] @relation("TemplateVersionCreatedBy")
+  templateVersionsPublished AssessmentTemplateVersion[] @relation("TemplateVersionPublishedBy")
+  assessmentsCreated        Assessment[]                @relation("AssessmentCreatedBy")
+  assessmentsUpdated        Assessment[]                @relation("AssessmentUpdatedBy")
+  assessmentsCompleted      Assessment[]                @relation("AssessmentCompletedBy")
+  assessmentAmendments      AssessmentAmendment[]       @relation("AssessmentAmendedBy")
 }
 
 // ── Access ──────────────────────────────────────────────────────────────────
@@ -243,12 +254,15 @@ model TherapyType {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  center           Center                    @relation(fields: [centerId], references: [id], onDelete: Restrict)
-  durationOptions  TherapyDurationOption[]
-  specializations  TherapistSpecialization[]
-  patientInterests PatientTherapyInterest[]
-  appointments     Appointment[]
-  series           AppointmentSeries[]
+  center              Center                     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  durationOptions     TherapyDurationOption[]
+  specializations     TherapistSpecialization[]
+  patientInterests    PatientTherapyInterest[]
+  appointments        Appointment[]
+  series              AppointmentSeries[]
+  assessmentTemplates AssessmentTemplate[]
+  assessments         Assessment[]
+  recommendations     AssessmentRecommendation[]
 
   @@unique([centerId, code])
   @@unique([centerId, name])
@@ -449,6 +463,7 @@ model Therapist {
   timeOff         TherapistTimeOff[]
   appointments    Appointment[]
   series          AppointmentSeries[]
+  assessments     Assessment[]
 
   @@unique([centerId, code])
   @@index([centerId, deletedAt, status])
@@ -607,6 +622,7 @@ model Patient {
   consents         PatientConsent[]
   appointments     Appointment[]
   series           AppointmentSeries[]
+  assessments      Assessment[]
 
   @@unique([centerId, code])
   @@index([centerId, deletedAt, status])
@@ -845,6 +861,8 @@ model Appointment {
   updatedBy   User?                @relation("AppointmentUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
   cancelledBy User?                @relation("AppointmentCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
   history     AppointmentHistory[]
+  /// The assessment recorded for this booking, if any (at most one)
+  assessment  Assessment?
 
   @@index([centerId, startAt])
   @@index([centerId, status, startAt])
@@ -871,4 +889,227 @@ model AppointmentHistory {
   performedBy User        @relation("AppointmentChangedBy", fields: [performedById], references: [id], onDelete: Restrict)
 
   @@index([appointmentId, createdAt])
+}
+
+// ── Assessments ─────────────────────────────────────────────────────────────
+// Clinical assessment records, built from center-defined templates rather than
+// hard-coded discipline forms. A template's form lives in versions: a version is
+// edited while DRAFT and frozen once published (a trigger in the assessments migration
+// refuses later changes to its definition), and every assessment points at the exact
+// version it was filled in with, so editing a template never changes past records.
+//
+// Definitions and answers are JSON validated by src/assessments/engine.ts, the one
+// schema both are checked against. The clinical summary, recommendations and goals are
+// ordinary columns and rows so later modules (therapy plans, reports) can query them.
+
+/// Why the assessment is done; not a discipline (that's the therapy type).
+enum AssessmentType {
+  INITIAL
+  FOLLOW_UP
+  REASSESSMENT
+}
+
+/// DRAFT: never published. PUBLISHED: has a published version and can be used.
+/// ARCHIVED: kept for history, can't be used for new assessments.
+enum AssessmentTemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// DRAFT: being edited (at most one per template). PUBLISHED: the version new
+/// assessments use (at most one). SUPERSEDED: replaced by a later version, still the
+/// form of the assessments filled in with it.
+enum TemplateVersionStatus {
+  DRAFT
+  PUBLISHED
+  SUPERSEDED
+}
+
+/// DRAFT: editable by its therapist, may be incomplete. COMPLETED: signed, read-only.
+/// AMENDED: corrected after completion; each correction is an AssessmentAmendment row.
+enum AssessmentStatus {
+  DRAFT
+  COMPLETED
+  AMENDED
+}
+
+enum GoalPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model AssessmentTemplate {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  centerId           String                   @db.Uuid
+  /// Fixed once a version is published, since assessments are filtered by it
+  therapyTypeId      String                   @db.Uuid
+  name               String
+  description        String?
+  /// The assessment type it's meant for; null means any
+  purpose            AssessmentType?
+  status             AssessmentTemplateStatus @default(DRAFT)
+  /// Number of the newest version, published or draft
+  latestVersion      Int                      @default(1)
+  /// The version new assessments use; null until first published
+  publishedVersionId String?                  @unique @db.Uuid
+  createdById        String                   @db.Uuid
+  archivedAt         DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  center           Center                      @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyType      TherapyType                 @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  createdBy        User                        @relation("TemplateCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedVersion AssessmentTemplateVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id], onDelete: Restrict)
+  versions         AssessmentTemplateVersion[] @relation("TemplateVersions")
+
+  @@unique([centerId, name])
+  @@index([centerId, therapyTypeId, status])
+}
+
+/// One version of a template's form. Its definition can't change once published.
+model AssessmentTemplateVersion {
+  id            String                @id @default(uuid()) @db.Uuid
+  centerId      String                @db.Uuid
+  templateId    String                @db.Uuid
+  version       Int
+  status        TemplateVersionStatus @default(DRAFT)
+  /// { sections: [{ key, title, description?, fields: [...] }] }, see engine.ts
+  definition    Json
+  createdById   String                @db.Uuid
+  publishedById String?               @db.Uuid
+  publishedAt   DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  center      Center              @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  template    AssessmentTemplate  @relation("TemplateVersions", fields: [templateId], references: [id], onDelete: Restrict)
+  createdBy   User                @relation("TemplateVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedBy User?               @relation("TemplateVersionPublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
+  publishedOf AssessmentTemplate? @relation("PublishedVersion")
+  assessments Assessment[]
+
+  @@unique([templateId, version])
+}
+
+/// A clinical assessment of one patient by one therapist. Never hard-deleted once
+/// completed; a draft can be discarded by its therapist.
+model Assessment {
+  id                String           @id @default(uuid()) @db.Uuid
+  centerId          String           @db.Uuid
+  patientId         String           @db.Uuid
+  /// The responsible therapist: the only person who edits, completes and amends it
+  therapistId       String           @db.Uuid
+  therapyTypeId     String           @db.Uuid
+  /// The exact form used; never changes after creation
+  templateVersionId String           @db.Uuid
+  /// The assessment booking it records, if any; one assessment per appointment
+  appointmentId     String?          @unique @db.Uuid
+  type              AssessmentType
+  /// Center-local date the assessment took place
+  assessmentDate    DateTime         @db.Date
+  status            AssessmentStatus @default(DRAFT)
+  /// Field key → answer, validated against the template version. Unanswered fields are
+  /// absent, never stored as empty values, so "not recorded" stays distinguishable.
+  answers           Json             @default("{}")
+
+  // Common clinical summary, kept as columns for reporting
+  summary                   String?
+  keyFindings               String?
+  strengths                 String?
+  areasOfDifficulty         String?
+  clinicalImpression        String?
+  followUpRecommendation    String?
+  additionalRecommendations String?
+  suggestedReviewDate       DateTime? @db.Date
+
+  /// Bumped on every content change; writes must send the revision they started from
+  revision      Int       @default(1)
+  createdById   String    @db.Uuid
+  updatedById   String?   @db.Uuid
+  completedById String?   @db.Uuid
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  center          Center                     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient         Patient                    @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  therapist       Therapist                  @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  therapyType     TherapyType                @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  templateVersion AssessmentTemplateVersion  @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  appointment     Appointment?               @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  createdBy       User                       @relation("AssessmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy       User?                      @relation("AssessmentUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  completedBy     User?                      @relation("AssessmentCompletedBy", fields: [completedById], references: [id], onDelete: Restrict)
+  recommendations AssessmentRecommendation[]
+  goals           AssessmentGoal[]
+  amendments      AssessmentAmendment[]
+
+  @@index([centerId, assessmentDate])
+  @@index([centerId, status, assessmentDate])
+  @@index([patientId, assessmentDate])
+  @@index([therapistId, assessmentDate])
+}
+
+/// A suggested service: a clinical suggestion only, never a booking, package or invoice.
+model AssessmentRecommendation {
+  id               String   @id @default(uuid()) @db.Uuid
+  assessmentId     String   @db.Uuid
+  therapyTypeId    String   @db.Uuid
+  sessionsPerWeek  Int?
+  durationMinutes  Int?
+  reviewAfterWeeks Int?
+  note             String?
+  displayOrder     Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  assessment  Assessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  therapyType TherapyType @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+
+  @@index([assessmentId, displayOrder])
+  @@index([therapyTypeId])
+}
+
+/// An initial goal the therapist suggests. Not an active treatment goal: the therapy
+/// plan module decides which ones to adopt.
+model AssessmentGoal {
+  id               String        @id @default(uuid()) @db.Uuid
+  assessmentId     String        @db.Uuid
+  title            String
+  description      String?
+  priority         GoalPriority?
+  targetReviewDate DateTime?     @db.Date
+  displayOrder     Int           @default(0)
+  createdAt        DateTime      @default(now())
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId, displayOrder])
+}
+
+/// One correction of a completed assessment, append-only. `previousContent` is the
+/// whole clinical content as it was before this correction (so the first row holds the
+/// originally signed record); the assessment itself holds the current content.
+model AssessmentAmendment {
+  id               String   @id @default(uuid()) @db.Uuid
+  centerId         String   @db.Uuid
+  assessmentId     String   @db.Uuid
+  /// 1 for the first correction
+  number           Int
+  reason           String
+  /// Labels of what changed (field labels, "Recommendations", …), never values
+  changedFields    Json
+  previousContent  Json
+  /// The assessment's revision before this correction
+  previousRevision Int
+  amendedById      String   @db.Uuid
+  amendedAt        DateTime @default(now())
+
+  center     Center     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  amendedBy  User       @relation("AssessmentAmendedBy", fields: [amendedById], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentId, number])
 }

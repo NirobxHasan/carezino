@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { CalendarSearch, ExternalLink, Pencil } from 'lucide-react';
+import { CalendarSearch, ClipboardCheck, ClipboardPlus, ExternalLink, Pencil } from 'lucide-react';
 
 import { RequirePermission } from '@/components/auth/require-permission';
 import { EmptyState, ErrorState, PageSkeleton } from '@/components/feedback/states';
@@ -44,6 +44,7 @@ import type {
   AppointmentType,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { ASSESSMENT_STATUSES, assessmentLinks } from '../assessments/assessment-display';
 import { relationshipLabel } from '../patients/patient-display';
 import { therapistLinks } from '../therapists/therapist-actions';
 import { availableActions, useAppointmentDialogs } from './appointment-actions';
@@ -242,6 +243,31 @@ export function AppointmentDetails({
   const contact = a.primaryContact;
   const sheet = variant === 'sheet';
 
+  // Assessment bookings lead to their clinical record: open it, or start one.
+  const assessmentLink =
+    a.type !== 'ASSESSMENT' || !can('assessments.read_own')
+      ? null
+      : a.assessment
+        ? {
+            href: assessmentLinks.detail(a.assessment.id),
+            label: 'Open assessment',
+            icon: ClipboardCheck,
+          }
+        : can('assessments.create') && a.status !== 'CANCELLED' && a.status !== 'NO_SHOW'
+          ? {
+              href: assessmentLinks.create({ appointmentId: a.id }),
+              label: 'Start assessment',
+              icon: ClipboardPlus,
+            }
+          : null;
+  const assessmentButton = assessmentLink && (
+    <Button size={sheet ? 'sm' : 'md'} asChild>
+      <Link href={assessmentLink.href}>
+        <assessmentLink.icon /> {assessmentLink.label}
+      </Link>
+    </Button>
+  );
+
   const actionBar = actions.length > 0 && (
     <div className="flex flex-wrap gap-2">
       {actions.map(({ action, label, icon: Icon, danger }) => (
@@ -315,6 +341,11 @@ export function AppointmentDetails({
           )}
         </Detail>
       )}
+      {a.type === 'ASSESSMENT' && can('assessments.read_own') && (
+        <Detail label="Assessment record">
+          {a.assessment ? ASSESSMENT_STATUSES[a.assessment.status].label : 'Not started'}
+        </Detail>
+      )}
       {a.series && (
         <Detail label="Recurring">
           {a.series.position &&
@@ -372,6 +403,7 @@ export function AppointmentDetails({
               </Link>
             </Button>
           </div>
+          {assessmentButton}
           {actionBar}
           {facts}
           <section className="grid gap-3">
@@ -395,6 +427,7 @@ export function AppointmentDetails({
         actions={
           <>
             {editButton}
+            {assessmentButton}
             {actionBar}
           </>
         }

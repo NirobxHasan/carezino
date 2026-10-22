@@ -63,6 +63,35 @@ export const PERMISSIONS = [
   'appointments.manage_status',
   /** Booking recurring series and cancelling a series' remaining appointments */
   'appointments.manage_recurring',
+  /** Assessment templates and their published forms, e.g. to choose one */
+  'assessment_templates.read',
+  'assessment_templates.create',
+  /** Editing a template's details and draft form, and starting a new version */
+  'assessment_templates.update',
+  /** Publishing a version for use, archiving and restoring templates */
+  'assessment_templates.publish',
+  /**
+   * Every assessment's date, patient, therapy, therapist and status, without clinical
+   * content: for front desk and operational oversight
+   */
+  'assessments.read_status',
+  /** Every assessment's clinical content, e.g. to review or print it. Never editing. */
+  'assessments.read',
+  /**
+   * Clinical content of the caller's own assessments (their linked therapist profile),
+   * and completed ones of patients in their care. Also the minimum for assessment routes.
+   */
+  'assessments.read_own',
+  /**
+   * The writes below only ever apply to the caller's own assessments: clinical content
+   * is written and signed by its therapist, whoever else can read it.
+   */
+  'assessments.create',
+  'assessments.update_draft',
+  /** Signing a draft off as completed */
+  'assessments.complete',
+  /** Correcting a completed assessment, with a reason; the earlier content is kept */
+  'assessments.amend',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -111,7 +140,29 @@ const MANAGE_APPOINTMENTS: Permission[] = [
   'appointments.manage_recurring',
 ];
 
+/**
+ * Writing and signing assessments. The service limits every write to the caller's own
+ * therapist profile, so this is safe to grant to anyone who may also see patients.
+ */
+const WRITE_OWN_ASSESSMENTS: Permission[] = [
+  'assessment_templates.read',
+  'assessments.read_own',
+  'assessments.create',
+  'assessments.update_draft',
+  'assessments.complete',
+  'assessments.amend',
+];
+
+/** Seeing that assessments exist and where they stand, never what they say. */
+const ASSESSMENT_STATUS: Permission[] = [
+  'assessments.read_status',
+  // Route minimum: without a linked therapist profile it adds no clinical access.
+  'assessments.read_own',
+];
+
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  // Everything, including reading (and printing) every assessment. Clinical writes stay
+  // limited to their own assessments, for admins who also see patients as therapists.
   [Role.CENTER_ADMIN]: PERMISSIONS,
   // Operational lead: sees the team and runs therapist schedules, but center settings,
   // access control and deleting therapist profiles stay with admins.
@@ -129,6 +180,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     ...MANAGE_PATIENTS,
     ...MANAGE_APPOINTMENTS,
     'appointments.cancel_late',
+    'assessment_templates.read',
+    ...ASSESSMENT_STATUS,
   ],
   [Role.RECEPTIONIST]: [
     'center.read',
@@ -137,10 +190,12 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     ...READ_THERAPISTS,
     ...MANAGE_PATIENTS,
     ...MANAGE_APPOINTMENTS,
+    ...ASSESSMENT_STATUS,
   ],
   // Their own therapist profile, schedule and appointments only, never colleagues'
   // records. They can confirm, complete and mark no-shows on their own sessions; booking,
-  // moving and cancelling stay with the front desk.
+  // moving and cancelling stay with the front desk. They assess the patients they see
+  // (src/assessments/access.ts decides which), without access to the patient list.
   [Role.THERAPIST]: [
     'center.read',
     ...READ_CONFIGURATION,
@@ -148,6 +203,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'therapists.read_own',
     'appointments.read_own',
     'appointments.manage_status',
+    ...WRITE_OWN_ASSESSMENTS,
   ],
 };
 

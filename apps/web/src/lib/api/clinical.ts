@@ -3,108 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO, subDays } from 'date-fns';
 
-import type {
-  Assessment,
-  AssessmentStatus,
-  FormValues,
-  Goal,
-  GoalStatus,
-  ID,
-  SessionNote,
-  TherapyPlan,
-} from '../types';
+import type { Goal, GoalStatus, ID, SessionNote, TherapyPlan } from '../types';
 import { backend, clone, latency, uid } from './client';
 import { keys } from './keys';
 import { patientRef, therapistRef, type PatientRef, type TherapistRef } from './refs';
 import type { AppointmentWithRefs } from './prototype-appointments';
-
-// ── Assessments ─────────────────────────────────────────────────────────────
-
-export type AssessmentWithRefs = Assessment & { patient: PatientRef; therapist: TherapistRef };
-
-export async function listAssessments(params: {
-  patientId?: ID;
-  status?: AssessmentStatus | 'all';
-  therapistId?: ID;
-}): Promise<AssessmentWithRefs[]> {
-  await latency();
-  const db = backend();
-  return clone(
-    db.assessments
-      .filter(
-        (a) =>
-          (!params.patientId || a.patientId === params.patientId) &&
-          (!params.therapistId || a.therapistId === params.therapistId) &&
-          (!params.status || params.status === 'all' || a.status === params.status),
-      )
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .map((a) => ({
-        ...a,
-        patient: patientRef(db, a.patientId),
-        therapist: therapistRef(db, a.therapistId),
-      })),
-  );
-}
-
-export async function getAssessment(id: ID): Promise<AssessmentWithRefs> {
-  await latency(200);
-  const db = backend();
-  const a = db.assessments.find((x) => x.id === id);
-  if (!a) throw new Error('Assessment not found');
-  return clone({
-    ...a,
-    patient: patientRef(db, a.patientId),
-    therapist: therapistRef(db, a.therapistId),
-  });
-}
-
-export interface AssessmentInput {
-  id?: ID;
-  patientId: ID;
-  therapistId: ID;
-  therapyTypeId: ID;
-  templateId: ID;
-  date: string;
-  values: FormValues;
-  status: Exclude<AssessmentStatus, 'scheduled'>;
-}
-
-export async function saveAssessment(input: AssessmentInput): Promise<Assessment> {
-  await latency(450);
-  const db = backend();
-  const template = db.templates.find((t) => t.id === input.templateId);
-  if (!template) throw new Error('Template not found');
-  const now = new Date().toISOString();
-  const existing = input.id ? db.assessments.find((a) => a.id === input.id) : undefined;
-  if (existing) {
-    if (existing.status === 'completed') throw new Error('Completed assessments are read-only.');
-    Object.assign(existing, input, { templateVersion: template.version, updatedAt: now });
-    return clone(existing);
-  }
-  const created: Assessment = {
-    ...input,
-    id: uid('as'),
-    templateVersion: template.version,
-    updatedAt: now,
-  };
-  db.assessments.push(created);
-
-  // Turn "initial goals" (one per line) into trackable goals once the assessment is completed.
-  if (input.status === 'completed' && typeof input.values.initial_goals === 'string') {
-    for (const line of input.values.initial_goals.split('\n').map((l) => l.trim())) {
-      if (!line) continue;
-      db.goals.push({
-        id: uid('gl'),
-        patientId: input.patientId,
-        therapyTypeId: input.therapyTypeId,
-        title: line,
-        status: 'active',
-        createdAt: format(new Date(), 'yyyy-MM-dd'),
-      });
-    }
-  }
-  return clone(created);
-}
 
 // ── Goals & plans ───────────────────────────────────────────────────────────
 
@@ -235,30 +138,6 @@ export async function saveNote(input: SessionNoteInput): Promise<SessionNote> {
 }
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
-
-export function useAssessments(params: Parameters<typeof listAssessments>[0]) {
-  return useQuery({ queryKey: keys.assessments(params), queryFn: () => listAssessments(params) });
-}
-
-export function useAssessment(id: ID | undefined) {
-  return useQuery({
-    queryKey: keys.assessment(id ?? ''),
-    queryFn: () => getAssessment(id!),
-    enabled: Boolean(id),
-  });
-}
-
-export function useSaveAssessment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: saveAssessment,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['assessments'] });
-      qc.invalidateQueries({ queryKey: ['goals'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
-    },
-  });
-}
 
 export function useGoals(patientId: ID | undefined) {
   return useQuery({

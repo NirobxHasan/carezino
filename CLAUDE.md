@@ -101,6 +101,17 @@ The e2e tests truncate every table, so they refuse to run without `TEST_DATABASE
 - Visibility goes through `visibleAppointments(tenant)`: `appointments.read` sees the center, `appointments.read_own` (the THERAPIST role) only appointments of the therapist profile linked to their membership.
 - Responses include center-local `date`/`startTime`/`endTime`, so the web never converts time zones itself. The dashboard prototype still uses mock appointments (`lib/api/prototype-appointments.ts`, `features/dashboard/prototype/`).
 
+## Assessments (apps/api/src/assessments)
+
+- Templates are center-scoped (`AssessmentTemplate`) with versioned forms (`AssessmentTemplateVersion.definition`, JSONB). One DRAFT version is edited at a time; publishing freezes it and supersedes the previous one. A trigger in the migration refuses changes to a published definition, so don't try to edit one: start a new version (`POST /assessment-templates/:id/versions`).
+- `engine.ts` is the single schema for definitions and answers (8 field types, options, limits, defaults). Definitions are plain data: unknown properties are rejected, nothing is evaluated. A field key kept across versions must keep its type (`typeChanges`). Answers are validated against the assessment's own version; empty answers are dropped, never stored, so "not recorded" stays distinct from a finding.
+- An `Assessment` stores its exact `templateVersionId` (never switched), dynamic `answers`, the common clinical summary as columns, and `AssessmentRecommendation`/`AssessmentGoal` rows. Recommendations and goals are suggestions only: nothing books, sells, bills or activates plan goals.
+- Lifecycle: DRAFT → COMPLETED (signed: required answers + summary, date ≤ today) → AMENDED. Amending writes an append-only `AssessmentAmendment` with the full previous content, reason and changed field labels. Completed assessments can't be deleted (trigger); drafts can be discarded. Writes carry `revision` (optimistic locking, 409 `ASSESSMENT_CHANGED`).
+- Access (`access.ts`): only the responsible therapist (profile linked to the caller's membership) writes, completes or amends. `assessments.read` reads all content (CENTER_ADMIN); `assessments.read_status` lists metadata only (MANAGER, RECEPTIONIST; detail returns `clinicalAccess: false`); `assessments.read_own` covers own assessments plus completed ones of patients in the caller's care (a non-cancelled appointment or assessment with them). Therapists without `patients.read` pick patients through `GET /assessments/patient-options`.
+- One assessment per appointment (unique `appointmentId`, 409 `APPOINTMENT_ALREADY_ASSESSED` with `assessmentId`); completing never changes the appointment's status. Appointment details include `assessment: { id, status }`.
+- Audit log entries (`assessment.created/completed/amended/discarded`, `assessment_template.*`) hold IDs, codes and field labels, never answers or summary text.
+- Web: `/assessments` (list, new, `[id]` editor/view, `[id]/print`), `/settings/assessment-templates` (builder with preview and versions), and an Assessments tab on the patient profile. `features/assessments/dynamic-form.tsx` renders any version's form. The old mock assessment functions in `lib/api/clinical.ts` were removed.
+
 ## Gotchas
 
 - **Ports:** the web app (`next dev`) runs on 3000 and the API on `process.env.PORT ?? 3001` (`apps/api/src/main.ts`). Don't set a global `PORT` when running `npm run dev`, or both apps will try to use it.

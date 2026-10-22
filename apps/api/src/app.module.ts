@@ -6,6 +6,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppointmentsModule } from './appointments/appointments.module';
+import { AssessmentsModule } from './assessments/assessments.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard, PermissionsGuard, SessionGuard } from './auth/guards';
 import { throttlerOptions } from './auth/throttle';
@@ -34,6 +35,7 @@ import { TherapyTypesModule } from './therapy-types/therapy-types.module';
     TherapistsModule,
     PatientsModule,
     AppointmentsModule,
+    AssessmentsModule,
   ],
   controllers: [AppController],
   providers: [

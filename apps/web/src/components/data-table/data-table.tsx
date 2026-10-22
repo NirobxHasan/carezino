@@ -76,7 +76,8 @@ export function DataTable<T>({
   sorting?: SortingState;
   onSortingChange?: (sorting: SortingState) => void;
   /** Makes the whole row clickable. Keep a real link in the first column for keyboard users. */
-  rowHref?: (row: T) => string;
+  /** Null leaves that row unclickable, e.g. when the caller can't open it */
+  rowHref?: (row: T) => string | null;
   getRowId?: (row: T) => string;
   toolbar?: React.ReactNode;
   className?: string;
@@ -168,27 +169,31 @@ export function DataTable<T>({
             ))}
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
-              <TableRow
-                key={row.id}
-                onClick={
-                  rowHref
-                    ? (e) => {
-                        // Let buttons, links and menus inside the row handle their own clicks.
-                        if ((e.target as HTMLElement).closest('a,button,[role="menuitem"]')) return;
-                        router.push(rowHref(row.original));
-                      }
-                    : undefined
-                }
-                className={cn(rowHref && 'cursor-pointer hover:bg-accent/50')}
-              >
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id} className={cell.column.columnDef.meta?.className}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
+            {rows.map((row) => {
+              const href = rowHref?.(row.original);
+              return (
+                <TableRow
+                  key={row.id}
+                  onClick={
+                    href
+                      ? (e) => {
+                          // Let buttons, links and menus inside the row handle their own clicks.
+                          if ((e.target as HTMLElement).closest('a,button,[role="menuitem"]'))
+                            return;
+                          router.push(href);
+                        }
+                      : undefined
+                  }
+                  className={cn(href && 'cursor-pointer hover:bg-accent/50')}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className={cell.column.columnDef.meta?.className}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}

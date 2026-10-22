@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CalendarPlus,
   CheckCircle2,
+  ClipboardList,
   Pencil,
   Trash2,
   UserCheck,
@@ -32,6 +33,7 @@ import type { PatientDetail } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { appointmentLinks } from '../appointments/appointment-display';
 import { AppointmentsPanel } from '../appointments/appointments-panel';
+import { PatientAssessmentsPanel } from '../assessments/patient-assessments';
 import { patientLinks, statusActions, usePatientDialogs } from './patient-actions';
 import { ConsentCard, ContactsCard } from './patient-contacts';
 import {
@@ -204,7 +206,7 @@ function RegisteredBanner({ patient }: { patient: PatientDetail }) {
   );
 }
 
-type Tab = 'overview' | 'appointments';
+type Tab = 'overview' | 'appointments' | 'assessments';
 
 function PatientProfile() {
   const { id, patient, fallback } = usePatientPage();
@@ -212,9 +214,14 @@ function PatientProfile() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const tabs = {
+    appointments: can('appointments.read_own'),
+    assessments: can('assessments.read_own'),
+  };
+  const requested = searchParams.get('tab');
   const tab: Tab =
-    searchParams.get('tab') === 'appointments' && can('appointments.read_own')
-      ? 'appointments'
+    (requested === 'appointments' || requested === 'assessments') && tabs[requested]
+      ? requested
       : 'overview';
   const general = useGeneralSettings();
   const { changeStatus, remove, dialogs } = usePatientDialogs({
@@ -291,9 +298,9 @@ function PatientProfile() {
           </>
         }
       />
-      {/* Assessments, plans, notes, packages and billing get their own tabs here once
-          those modules exist; until then there's nothing real to show. */}
-      {can('appointments.read_own') ? (
+      {/* Plans, notes, packages and billing get their own tabs here once those modules
+          exist; until then there's nothing real to show. */}
+      {tabs.appointments || tabs.assessments ? (
         <Tabs
           value={tab}
           onValueChange={(next) => {
@@ -307,9 +314,16 @@ function PatientProfile() {
         >
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="appointments">
-              <CalendarDays /> Appointments
-            </TabsTrigger>
+            {tabs.appointments && (
+              <TabsTrigger value="appointments">
+                <CalendarDays /> Appointments
+              </TabsTrigger>
+            )}
+            {tabs.assessments && (
+              <TabsTrigger value="assessments">
+                <ClipboardList /> Assessments
+              </TabsTrigger>
+            )}
           </TabsList>
           <TabsContent value="overview">
             <Overview patient={patient} />
@@ -317,6 +331,9 @@ function PatientProfile() {
           <TabsContent value="appointments">
             {/* The header already offers booking for this patient. */}
             <AppointmentsPanel patientId={id} />
+          </TabsContent>
+          <TabsContent value="assessments">
+            <PatientAssessmentsPanel patientId={id} />
           </TabsContent>
         </Tabs>
       ) : (

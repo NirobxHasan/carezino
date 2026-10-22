@@ -37,8 +37,17 @@ export const keys = {
   prototypeAppointments: (params?: object) => ['prototype', 'appointments', params ?? {}] as const,
   prototypeAppointment: (id: string) => ['prototype', 'appointments', 'detail', id] as const,
   prototypeSlots: (params: object) => ['prototype', 'appointments', 'slots', params] as const,
-  assessments: (params?: object) => ['assessments', params ?? {}] as const,
+  assessmentList: (params?: object) => ['assessments', 'list', params ?? {}] as const,
   assessment: (id: string) => ['assessments', 'detail', id] as const,
+  assessmentAmendment: (id: string, number: number) =>
+    ['assessments', 'amendment', id, number] as const,
+  patientAssessments: (patientId: string) => ['assessments', 'patient', patientId] as const,
+  assessmentPatientOptions: (q: string) => ['assessments', 'patient-options', q] as const,
+  templateList: (params?: object) => ['assessment-templates', 'list', params ?? {}] as const,
+  template: (id: string) => ['assessment-templates', 'detail', id] as const,
+  templateVersions: (id: string) => ['assessment-templates', 'versions', id] as const,
+  templateVersion: (id: string, versionId: string) =>
+    ['assessment-templates', 'version', id, versionId] as const,
   notes: (params?: object) => ['notes', params ?? {}] as const,
   note: (appointmentId: string) => ['notes', 'appointment', appointmentId] as const,
   goals: (patientId: string) => ['goals', patientId] as const,

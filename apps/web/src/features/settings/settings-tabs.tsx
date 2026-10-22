@@ -10,6 +10,11 @@ import { cn } from '@/lib/utils';
 const TABS: { href: string; label: string; permission: Permission }[] = [
   { href: '/settings/center', label: 'Center profile', permission: 'center.read' },
   { href: '/settings/therapy-types', label: 'Therapy types', permission: 'therapy_types.read' },
+  {
+    href: '/settings/assessment-templates',
+    label: 'Assessment templates',
+    permission: 'assessment_templates.read',
+  },
   { href: '/settings/working-hours', label: 'Working hours', permission: 'center_settings.read' },
   { href: '/settings/holidays', label: 'Holidays & closures', permission: 'center_settings.read' },
   { href: '/settings/scheduling', label: 'Scheduling', permission: 'center_settings.read' },

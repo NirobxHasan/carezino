@@ -46,6 +46,17 @@ export const API_PERMISSIONS = [
   'appointments.cancel_late',
   'appointments.manage_status',
   'appointments.manage_recurring',
+  'assessment_templates.read',
+  'assessment_templates.create',
+  'assessment_templates.update',
+  'assessment_templates.publish',
+  'assessments.read_status',
+  'assessments.read',
+  'assessments.read_own',
+  'assessments.create',
+  'assessments.update_draft',
+  'assessments.complete',
+  'assessments.amend',
 ] as const;
 
 export type ApiPermission = (typeof API_PERMISSIONS)[number];

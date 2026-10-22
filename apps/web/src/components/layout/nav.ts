@@ -60,10 +60,11 @@ export const navGroups: NavGroup[] = [
     label: 'Clinical',
     items: [
       {
-        title: 'Clinical records',
-        href: '/clinical',
+        title: 'Assessments',
+        href: '/assessments',
         icon: ClipboardList,
-        permission: 'clinical.view',
+        // Front desk sees status only; therapists their own and their patients'.
+        permission: 'assessments.read_own',
       },
     ],
   },
@@ -108,6 +109,8 @@ export const segmentLabels: Record<string, string> = {
   staff: 'Staff & permissions',
   profile: 'My profile',
   'design-system': 'Design system',
+  'assessment-templates': 'Assessment templates',
+  print: 'Print',
   new: 'New',
   edit: 'Edit',
   schedule: 'Schedule',

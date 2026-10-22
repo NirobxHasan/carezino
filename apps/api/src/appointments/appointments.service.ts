@@ -128,6 +128,7 @@ const detailSelect = {
       endsOn: true,
     },
   },
+  assessment: { select: { id: true, status: true } },
   history: {
     select: {
       id: true,
@@ -577,6 +578,8 @@ export class AppointmentsService {
       createdBy: row.createdBy,
       updatedBy: row.updatedBy,
       cancelledBy: row.cancelledBy,
+      /** The assessment recording this booking, if any (status only; see assessments) */
+      assessment: row.assessment,
       series: row.series && {
         id: row.series.id,
         status: row.series.status,
