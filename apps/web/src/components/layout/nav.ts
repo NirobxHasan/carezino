@@ -3,6 +3,7 @@ import {
   ChartColumn,
   ClipboardList,
   LayoutDashboard,
+  ListChecks,
   Package,
   Settings,
   Stethoscope,
@@ -66,12 +67,25 @@ export const navGroups: NavGroup[] = [
         // Front desk sees status only; therapists their own and their patients'.
         permission: 'assessments.read_own',
       },
+      {
+        title: 'Therapy plans',
+        href: '/therapy-plans',
+        icon: ListChecks,
+        // Front desk and managers see schedules and review dates, not clinical content.
+        permission: 'therapy_plans.read_own',
+      },
     ],
   },
   {
     label: 'Business',
     items: [
-      { title: 'Therapy packages', href: '/packages', icon: Package, permission: 'packages.view' },
+      {
+        title: 'Therapy packages',
+        href: '/packages',
+        icon: Package,
+        // Front desk sells packages; therapists see coverage on their appointments only.
+        permission: 'packages.read',
+      },
       { title: 'Finance', href: '/finance', icon: Wallet, permission: 'finance.view' },
       { title: 'Reports', href: '/reports', icon: ChartColumn, permission: 'reports.view' },
     ],
@@ -97,6 +111,7 @@ export const segmentLabels: Record<string, string> = {
   assessments: 'Assessments',
   notes: 'Session notes',
   packages: 'Therapy packages',
+  enrollments: 'Enrollments',
   finance: 'Finance',
   reports: 'Reports',
   settings: 'Settings',
@@ -110,6 +125,9 @@ export const segmentLabels: Record<string, string> = {
   profile: 'My profile',
   'design-system': 'Design system',
   'assessment-templates': 'Assessment templates',
+  'therapy-plans': 'Therapy plans',
+  'goal-categories': 'Goal categories',
+  reviews: 'Reviews',
   print: 'Print',
   new: 'New',
   edit: 'Edit',

@@ -112,6 +112,14 @@ class BookingFields {
   @IsOptional()
   @IsBoolean()
   allowOverlap?: boolean;
+
+  /**
+   * The patient's package enrollment that pays for it: one session is held per
+   * appointment. Needs package_enrollments.read. Without it nothing is held.
+   */
+  @IsOptional()
+  @IsUUID('all', { message: 'Choose a package' })
+  packageEnrollmentId?: string;
 }
 
 export class CreateAppointmentDto extends BookingFields {
@@ -153,6 +161,23 @@ export class RescheduleAppointmentDto {
   @IsOptional()
   @IsBoolean()
   allowOverlap?: boolean;
+
+  /**
+   * Left out: the appointment keeps its package, which must still cover the new time.
+   * null: taken off its package. An ID: moved to that package.
+   */
+  @IsOptional()
+  @IsUUID('all', { message: 'Choose a package' })
+  packageEnrollmentId?: string | null;
+}
+
+/** Which package pays for an open appointment; null takes it off its package. */
+export class ChangeAppointmentPackageDto {
+  @ValidateIf(
+    (o: ChangeAppointmentPackageDto) => o.packageEnrollmentId !== null,
+  )
+  @IsUUID('all', { message: 'Choose a package' })
+  packageEnrollmentId!: string | null;
 }
 
 export class CancelAppointmentDto {

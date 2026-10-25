@@ -1,52 +1,13 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, parseISO, subDays } from 'date-fns';
+import { parseISO, subDays } from 'date-fns';
 
-import type { Goal, GoalStatus, ID, SessionNote, TherapyPlan } from '../types';
+import type { ID, SessionNote } from '../types';
 import { backend, clone, latency, uid } from './client';
 import { keys } from './keys';
 import { patientRef, therapistRef, type PatientRef, type TherapistRef } from './refs';
 import type { AppointmentWithRefs } from './prototype-appointments';
-
-// ── Goals & plans ───────────────────────────────────────────────────────────
-
-export async function listGoals(patientId: ID): Promise<Goal[]> {
-  await latency(200);
-  return clone(backend().goals.filter((g) => g.patientId === patientId));
-}
-
-export async function addGoal(input: Omit<Goal, 'id' | 'createdAt' | 'status'>): Promise<Goal> {
-  await latency(300);
-  const goal: Goal = {
-    ...input,
-    id: uid('gl'),
-    status: 'active',
-    createdAt: format(new Date(), 'yyyy-MM-dd'),
-  };
-  backend().goals.push(goal);
-  return clone(goal);
-}
-
-export async function setGoalStatus({ id, status }: { id: ID; status: GoalStatus }) {
-  await latency(250);
-  const goal = backend().goals.find((g) => g.id === id);
-  if (!goal) throw new Error('Goal not found');
-  goal.status = status;
-  return clone(goal);
-}
-
-export async function listPlans(
-  patientId: ID,
-): Promise<(TherapyPlan & { therapist: TherapistRef })[]> {
-  await latency(200);
-  const db = backend();
-  return clone(
-    db.therapyPlans
-      .filter((p) => p.patientId === patientId)
-      .map((p) => ({ ...p, therapist: therapistRef(db, p.therapistId) })),
-  );
-}
 
 // ── Session notes ───────────────────────────────────────────────────────────
 
@@ -138,34 +99,6 @@ export async function saveNote(input: SessionNoteInput): Promise<SessionNote> {
 }
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
-
-export function useGoals(patientId: ID | undefined) {
-  return useQuery({
-    queryKey: keys.goals(patientId ?? ''),
-    queryFn: () => listGoals(patientId!),
-    enabled: Boolean(patientId),
-  });
-}
-
-export function useAddGoal() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: addGoal,
-    onSuccess: (goal) => qc.invalidateQueries({ queryKey: keys.goals(goal.patientId) }),
-  });
-}
-
-export function useSetGoalStatus() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: setGoalStatus,
-    onSuccess: (goal) => qc.invalidateQueries({ queryKey: keys.goals(goal.patientId) }),
-  });
-}
-
-export function usePlans(patientId: ID) {
-  return useQuery({ queryKey: keys.plans(patientId), queryFn: () => listPlans(patientId) });
-}
 
 export function useNotes(params: Parameters<typeof listNotes>[0]) {
   return useQuery({ queryKey: keys.notes(params), queryFn: () => listNotes(params) });

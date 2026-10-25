@@ -67,6 +67,8 @@ interface BookingInput {
   internalNotes?: string;
   /** Book over clashes with other appointments where the center allows double booking */
   allowOverlap?: boolean;
+  /** The patient's package that pays for it: one session is held per appointment */
+  packageEnrollmentId?: string;
 }
 
 export interface CreateAppointmentInput extends BookingInput {
@@ -82,6 +84,8 @@ export interface RescheduleInput {
   therapyTypeId?: string;
   reason?: string;
   allowOverlap?: boolean;
+  /** Left out: keep the package. null: take it off. An ID: move to that package. */
+  packageEnrollmentId?: string | null;
 }
 
 export interface CancelInput {
@@ -137,6 +141,12 @@ export const appointmentsApi = {
     request<AppointmentDetail>(`${path(id)}/reschedule`, { method: 'PATCH', body: input }),
   cancel: (id: string, input: CancelInput) =>
     request<AppointmentDetail>(`${path(id)}/cancel`, { method: 'PATCH', body: input }),
+  /** Which package pays for an open appointment; null takes it off its package */
+  setPackage: (id: string, packageEnrollmentId: string | null) =>
+    request<AppointmentDetail>(`${path(id)}/package`, {
+      method: 'PATCH',
+      body: { packageEnrollmentId },
+    }),
   setStatus: (id: string, status: StatusChange) =>
     request<AppointmentDetail>(`${path(id)}/status`, { method: 'PATCH', body: { status } }),
   previewSeries: (input: SeriesInput) =>
@@ -222,6 +232,8 @@ function useAppointmentMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TRe
       // Also after failures: a 409 means someone else's booking changed what's free.
       void qc.invalidateQueries({ queryKey: ['appointments'] });
       void qc.invalidateQueries({ queryKey: ['therapists'] });
+      // Booking, moving, cancelling and completing hold, free or use package sessions.
+      void qc.invalidateQueries({ queryKey: ['package-enrollments'] });
     },
   });
 }
@@ -240,6 +252,12 @@ export function useUpdateAppointment() {
 export function useRescheduleAppointment() {
   return useAppointmentMutation((v: { id: string; input: RescheduleInput }) =>
     appointmentsApi.reschedule(v.id, v.input),
+  );
+}
+
+export function useSetAppointmentPackage() {
+  return useAppointmentMutation((v: { id: string; packageEnrollmentId: string | null }) =>
+    appointmentsApi.setPackage(v.id, v.packageEnrollmentId),
   );
 }
 

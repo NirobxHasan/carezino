@@ -25,6 +25,12 @@ const nextConfig: NextConfig = {
     return [
       { source: "/", destination: "/dashboard", permanent: false },
       { source: "/settings", destination: "/settings/center", permanent: false },
+      // A plan's reviews are a tab of the plan page (breadcrumbs link here).
+      {
+        source: "/therapy-plans/:id/reviews",
+        destination: "/therapy-plans/:id?tab=reviews",
+        permanent: false,
+      },
     ];
   },
   async headers() {

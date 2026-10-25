@@ -58,6 +58,17 @@ model Center {
   templateVersions     AssessmentTemplateVersion[]
   assessments          Assessment[]
   assessmentAmendments AssessmentAmendment[]
+  goalCategories       TherapyGoalCategory[]
+  therapyPlans         TherapyPlan[]
+  therapyPlanGoals     TherapyPlanGoal[]
+  goalProgress         TherapyGoalProgress[]
+  planReviews          TherapyPlanReview[]
+  reviewAmendments     TherapyPlanReviewAmendment[]
+  planRevisions        TherapyPlanRevision[]
+  therapyPackages      TherapyPackage[]
+  packageEnrollments   PackageEnrollment[]
+  packageLedger        PackageSessionLedger[]
+  packageReservations  PackageSessionReservation[]
 }
 
 /// Per-center counters for human-readable numbers such as patient codes. A number is
@@ -101,22 +112,40 @@ model User {
   memberships               CenterMembership[]
   sessions                  Session[]
   passwordResetTokens       PasswordResetToken[]
-  invitationsSent           Invitation[]                @relation("InvitedBy")
+  invitationsSent           Invitation[]                 @relation("InvitedBy")
   auditLogs                 AuditLog[]
-  patientsRegistered        Patient[]                   @relation("PatientRegisteredBy")
-  consentsRecorded          PatientConsent[]            @relation("ConsentRecordedBy")
-  appointmentsBooked        Appointment[]               @relation("AppointmentCreatedBy")
-  appointmentsUpdated       Appointment[]               @relation("AppointmentUpdatedBy")
-  appointmentsCancelled     Appointment[]               @relation("AppointmentCancelledBy")
-  seriesBooked              AppointmentSeries[]         @relation("SeriesCreatedBy")
-  appointmentChanges        AppointmentHistory[]        @relation("AppointmentChangedBy")
-  templatesCreated          AssessmentTemplate[]        @relation("TemplateCreatedBy")
-  templateVersionsMade      AssessmentTemplateVersion[] @relation("TemplateVersionCreatedBy")
-  templateVersionsPublished AssessmentTemplateVersion[] @relation("TemplateVersionPublishedBy")
-  assessmentsCreated        Assessment[]                @relation("AssessmentCreatedBy")
-  assessmentsUpdated        Assessment[]                @relation("AssessmentUpdatedBy")
-  assessmentsCompleted      Assessment[]                @relation("AssessmentCompletedBy")
-  assessmentAmendments      AssessmentAmendment[]       @relation("AssessmentAmendedBy")
+  patientsRegistered        Patient[]                    @relation("PatientRegisteredBy")
+  consentsRecorded          PatientConsent[]             @relation("ConsentRecordedBy")
+  appointmentsBooked        Appointment[]                @relation("AppointmentCreatedBy")
+  appointmentsUpdated       Appointment[]                @relation("AppointmentUpdatedBy")
+  appointmentsCancelled     Appointment[]                @relation("AppointmentCancelledBy")
+  seriesBooked              AppointmentSeries[]          @relation("SeriesCreatedBy")
+  appointmentChanges        AppointmentHistory[]         @relation("AppointmentChangedBy")
+  templatesCreated          AssessmentTemplate[]         @relation("TemplateCreatedBy")
+  templateVersionsMade      AssessmentTemplateVersion[]  @relation("TemplateVersionCreatedBy")
+  templateVersionsPublished AssessmentTemplateVersion[]  @relation("TemplateVersionPublishedBy")
+  assessmentsCreated        Assessment[]                 @relation("AssessmentCreatedBy")
+  assessmentsUpdated        Assessment[]                 @relation("AssessmentUpdatedBy")
+  assessmentsCompleted      Assessment[]                 @relation("AssessmentCompletedBy")
+  assessmentAmendments      AssessmentAmendment[]        @relation("AssessmentAmendedBy")
+  plansCreated              TherapyPlan[]                @relation("PlanCreatedBy")
+  plansUpdated              TherapyPlan[]                @relation("PlanUpdatedBy")
+  plansActivated            TherapyPlan[]                @relation("PlanActivatedBy")
+  plansCompleted            TherapyPlan[]                @relation("PlanCompletedBy")
+  plansDiscontinued         TherapyPlan[]                @relation("PlanDiscontinuedBy")
+  goalsCreated              TherapyPlanGoal[]            @relation("GoalCreatedBy")
+  goalStatusChanges         TherapyPlanGoal[]            @relation("GoalStatusChangedBy")
+  progressRecorded          TherapyGoalProgress[]        @relation("ProgressRecordedBy")
+  planReviews               TherapyPlanReview[]          @relation("PlanReviewedBy")
+  reviewAmendments          TherapyPlanReviewAmendment[] @relation("ReviewAmendedBy")
+  planRevisions             TherapyPlanRevision[]        @relation("PlanRevisedBy")
+  packagesCreated           TherapyPackage[]             @relation("PackageCreatedBy")
+  packagesUpdated           TherapyPackage[]             @relation("PackageUpdatedBy")
+  enrollmentsCreated        PackageEnrollment[]          @relation("EnrollmentCreatedBy")
+  enrollmentsCancelled      PackageEnrollment[]          @relation("EnrollmentCancelledBy")
+  packageMovements          PackageSessionLedger[]       @relation("LedgerCreatedBy")
+  reservationsMade          PackageSessionReservation[]  @relation("ReservationCreatedBy")
+  reservationsReleased      PackageSessionReservation[]  @relation("ReservationReleasedBy")
 }
 
 // ── Access ──────────────────────────────────────────────────────────────────
@@ -254,7 +283,7 @@ model TherapyType {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  center              Center                     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  center              Center                         @relation(fields: [centerId], references: [id], onDelete: Restrict)
   durationOptions     TherapyDurationOption[]
   specializations     TherapistSpecialization[]
   patientInterests    PatientTherapyInterest[]
@@ -263,6 +292,10 @@ model TherapyType {
   assessmentTemplates AssessmentTemplate[]
   assessments         Assessment[]
   recommendations     AssessmentRecommendation[]
+  goalCategories      TherapyGoalCategory[]
+  therapyPlans        TherapyPlan[]
+  packages            PackageEligibleTherapyType[]
+  enrollments         PackageEnrollmentTherapyType[]
 
   @@unique([centerId, code])
   @@unique([centerId, name])
@@ -464,6 +497,8 @@ model Therapist {
   appointments    Appointment[]
   series          AppointmentSeries[]
   assessments     Assessment[]
+  therapyPlans    TherapyPlan[]
+  planReviews     TherapyPlanReview[]
 
   @@unique([centerId, code])
   @@index([centerId, deletedAt, status])
@@ -623,6 +658,8 @@ model Patient {
   appointments     Appointment[]
   series           AppointmentSeries[]
   assessments      Assessment[]
+  therapyPlans     TherapyPlan[]
+  packages         PackageEnrollment[]
 
   @@unique([centerId, code])
   @@index([centerId, deletedAt, status])
@@ -820,55 +857,62 @@ model AppointmentSeries {
 
 /// Never deleted: cancelling sets status CANCELLED and keeps the row and its history.
 model Appointment {
-  id                 String              @id @default(uuid()) @db.Uuid
-  centerId           String              @db.Uuid
+  id                  String              @id @default(uuid()) @db.Uuid
+  centerId            String              @db.Uuid
   /// Set when created by a recurring booking; stays set if this occurrence is moved
-  seriesId           String?             @db.Uuid
-  patientId          String              @db.Uuid
-  therapistId        String              @db.Uuid
-  therapyTypeId      String              @db.Uuid
-  type               AppointmentType
+  seriesId            String?             @db.Uuid
+  patientId           String              @db.Uuid
+  therapistId         String              @db.Uuid
+  therapyTypeId       String              @db.Uuid
+  type                AppointmentType
   /// Half-open [startAt, endAt), UTC; endAt = startAt + durationMinutes
-  startAt            DateTime
-  endAt              DateTime
+  startAt             DateTime
+  endAt               DateTime
   /// The booked length, kept even if the therapy type's duration options change later
-  durationMinutes    Int
+  durationMinutes     Int
   /// CenterSchedulingSettings.bookingBufferMinutes when booked: the therapist is kept
   /// free for this long after endAt
-  bufferMinutes      Int                 @default(0)
+  bufferMinutes       Int                 @default(0)
   /// Booked over a clash on purpose, because the center allows double booking. Such rows
   /// are exempt from the overlap constraints; nothing else is.
-  allowOverlap       Boolean             @default(false)
-  status             AppointmentStatus   @default(SCHEDULED)
-  internalNotes      String?
-  createdById        String              @db.Uuid
-  updatedById        String?             @db.Uuid
-  cancelledAt        DateTime?
-  cancelledById      String?             @db.Uuid
-  cancellationReason CancellationReason?
-  cancellationNote   String?
+  allowOverlap        Boolean             @default(false)
+  status              AppointmentStatus   @default(SCHEDULED)
+  internalNotes       String?
+  createdById         String              @db.Uuid
+  updatedById         String?             @db.Uuid
+  cancelledAt         DateTime?
+  cancelledById       String?             @db.Uuid
+  cancellationReason  CancellationReason?
+  cancellationNote    String?
   /// Cancelled with less notice than the center's cancellation cutoff
-  lateCancellation   Boolean             @default(false)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  lateCancellation    Boolean             @default(false)
+  /// The package enrollment this booking was assigned to, if any. Whether it still
+  /// holds or used a session is its PackageSessionReservation's status.
+  packageEnrollmentId String?             @db.Uuid
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
-  center      Center               @relation(fields: [centerId], references: [id], onDelete: Restrict)
-  series      AppointmentSeries?   @relation(fields: [seriesId], references: [id], onDelete: Restrict)
-  patient     Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  therapist   Therapist            @relation(fields: [therapistId], references: [id], onDelete: Restrict)
-  therapyType TherapyType          @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
-  createdBy   User                 @relation("AppointmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  updatedBy   User?                @relation("AppointmentUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
-  cancelledBy User?                @relation("AppointmentCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
-  history     AppointmentHistory[]
+  center              Center                      @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  series              AppointmentSeries?          @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+  packageEnrollment   PackageEnrollment?          @relation(fields: [packageEnrollmentId], references: [id], onDelete: Restrict)
+  packageReservations PackageSessionReservation[]
+  packageMovements    PackageSessionLedger[]
+  patient             Patient                     @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  therapist           Therapist                   @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  therapyType         TherapyType                 @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  createdBy           User                        @relation("AppointmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy           User?                       @relation("AppointmentUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  cancelledBy         User?                       @relation("AppointmentCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  history             AppointmentHistory[]
   /// The assessment recorded for this booking, if any (at most one)
-  assessment  Assessment?
+  assessment          Assessment?
 
   @@index([centerId, startAt])
   @@index([centerId, status, startAt])
   @@index([therapistId, startAt])
   @@index([patientId, startAt])
   @@index([seriesId, startAt])
+  @@index([packageEnrollmentId])
 }
 
 /// Append-only log of what happened to an appointment and who did it. Values hold
@@ -1046,6 +1090,8 @@ model Assessment {
   recommendations AssessmentRecommendation[]
   goals           AssessmentGoal[]
   amendments      AssessmentAmendment[]
+  /// Therapy plans based on this assessment; they never change it
+  therapyPlans    TherapyPlan[]
 
   @@index([centerId, assessmentDate])
   @@index([centerId, status, assessmentDate])
@@ -1112,4 +1158,659 @@ model AssessmentAmendment {
   amendedBy  User       @relation("AssessmentAmendedBy", fields: [amendedById], references: [id], onDelete: Restrict)
 
   @@unique([assessmentId, number])
+}
+
+// ── Therapy plans ───────────────────────────────────────────────────────────
+// A therapy plan is the intended treatment for one patient in one service: who leads it,
+// how often sessions are recommended, and the goals they work towards. It never books,
+// sells, bills or documents a session; appointments, packages, invoices and session
+// notes are their own records and may point at a plan later.
+//
+// Drafts are edited freely. From activation on, every clinically significant change
+// appends a TherapyPlanRevision (who, when, why, the values before and after), progress
+// is an append-only list of observations per goal, and reviews are kept with a snapshot
+// of the goals as they stood. Triggers in the therapy plans migration refuse changes to
+// closed plans and to those append-only histories.
+
+/// DRAFT: being written. ACTIVE: the treatment in force. PAUSED: on hold, with a reason.
+/// COMPLETED / DISCONTINUED: closed for good, read-only.
+enum TherapyPlanStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  DISCONTINUED
+}
+
+/// A calendar period, for recommended frequency and review intervals.
+enum PlanPeriodUnit {
+  DAY
+  WEEK
+  MONTH
+}
+
+enum TherapyGoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACHIEVED
+  ON_HOLD
+  DISCONTINUED
+}
+
+/// How a goal is measured. Only NARRATIVE goals have no numbers; the others keep
+/// numeric baseline, target and progress values, checked by src/therapy-plans/measurement.ts.
+enum GoalMeasurementType {
+  NARRATIVE
+  PERCENTAGE
+  COUNT
+  DURATION
+  FREQUENCY
+  RATING_SCALE
+  CUSTOM
+}
+
+/// A therapist's overall judgement at a review: a documentation label, never computed.
+enum ReviewOverallProgress {
+  SIGNIFICANT
+  MODERATE
+  MINIMAL
+  NONE
+  REGRESSION
+  NOT_ENOUGH_INFORMATION
+}
+
+/// What a review recommends. Recording it changes nothing; staff act on it explicitly.
+enum ReviewRecommendation {
+  CONTINUE
+  MODIFY
+  INCREASE_FREQUENCY
+  DECREASE_FREQUENCY
+  PAUSE
+  COMPLETE
+  REFER_FOR_ASSESSMENT
+}
+
+/// What a plan history entry records.
+enum TherapyPlanEvent {
+  ACTIVATED
+  PAUSED
+  RESUMED
+  COMPLETED
+  DISCONTINUED
+  /// Plan details (frequency, duration, dates, focus, …) changed after activation
+  REVISED
+  THERAPIST_REASSIGNED
+  GOAL_ADDED
+  GOAL_UPDATED
+}
+
+/// Center-defined goal groupings, optionally for one therapy type. Kept forever once
+/// used (goals refer to them); deactivated ones can't be chosen for new goals.
+model TherapyGoalCategory {
+  id            String   @id @default(uuid()) @db.Uuid
+  centerId      String   @db.Uuid
+  /// Null: offered for every therapy type
+  therapyTypeId String?  @db.Uuid
+  name          String
+  description   String?
+  isActive      Boolean  @default(true)
+  displayOrder  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  center      Center            @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyType TherapyType?      @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  goals       TherapyPlanGoal[]
+
+  // Names are unique per center and therapy type (case-insensitively), by an index in
+  // the migration.
+  @@index([centerId, isActive, displayOrder])
+}
+
+model TherapyPlan {
+  id                     String            @id @default(uuid()) @db.Uuid
+  centerId               String            @db.Uuid
+  /// Generated per center from CenterSequence, e.g. TP-0007. Never reused.
+  code                   String
+  patientId              String            @db.Uuid
+  therapyTypeId          String            @db.Uuid
+  /// The responsible therapist: the one who edits, activates, reviews and revises it
+  therapistId            String            @db.Uuid
+  /// The completed assessment it was based on, if any. Never changed by the plan.
+  sourceAssessmentId     String?           @db.Uuid
+  title                  String
+  treatmentFocus         String?
+  clinicalNotes          String?
+  /// Recommended frequency: sessionsPerPeriod per frequencyUnit, e.g. 3 per WEEK.
+  /// A recommendation only; appointments are booked separately.
+  sessionsPerPeriod      Int?
+  frequencyUnit          PlanPeriodUnit?
+  durationMinutes        Int?
+  reviewIntervalValue    Int?
+  reviewIntervalUnit     PlanPeriodUnit?
+  additionalInstructions String?
+  /// Center-local dates
+  startDate              DateTime          @db.Date
+  targetEndDate          DateTime?         @db.Date
+  /// A clinical follow-up target, never a booking
+  nextReviewDate         DateTime?         @db.Date
+  status                 TherapyPlanStatus @default(DRAFT)
+  activatedAt            DateTime?
+  activatedById          String?           @db.Uuid
+  pausedAt               DateTime?
+  /// Why it was paused or discontinued (the latest such change)
+  statusReason           String?
+  completedAt            DateTime?
+  completedById          String?           @db.Uuid
+  completionSummary      String?
+  discontinuedAt         DateTime?
+  discontinuedById       String?           @db.Uuid
+  /// Bumped on every change to the plan row; writes must send the revision they started from
+  revision               Int               @default(1)
+  createdById            String            @db.Uuid
+  updatedById            String?           @db.Uuid
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  center           Center                @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient          Patient               @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  therapyType      TherapyType           @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  therapist        Therapist             @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  sourceAssessment Assessment?           @relation(fields: [sourceAssessmentId], references: [id], onDelete: Restrict)
+  /// Packages bought for this treatment; they never change the plan
+  packages         PackageEnrollment[]
+  activatedBy      User?                 @relation("PlanActivatedBy", fields: [activatedById], references: [id], onDelete: Restrict)
+  completedBy      User?                 @relation("PlanCompletedBy", fields: [completedById], references: [id], onDelete: Restrict)
+  discontinuedBy   User?                 @relation("PlanDiscontinuedBy", fields: [discontinuedById], references: [id], onDelete: Restrict)
+  createdBy        User                  @relation("PlanCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy        User?                 @relation("PlanUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  goals            TherapyPlanGoal[]
+  progress         TherapyGoalProgress[]
+  reviews          TherapyPlanReview[]
+  revisions        TherapyPlanRevision[]
+
+  // At most one ACTIVE or PAUSED plan per patient and therapy type: a partial unique
+  // index in the migration.
+  @@unique([centerId, code])
+  @@index([centerId, status, nextReviewDate])
+  @@index([centerId, createdAt])
+  @@index([patientId, status])
+  @@index([therapistId, status])
+  @@index([therapyTypeId])
+  @@index([sourceAssessmentId])
+}
+
+/// One treatment goal. Never deleted once the plan is active: goals that stop being
+/// worked on are DISCONTINUED and stay in the record.
+model TherapyPlanGoal {
+  id                     String              @id @default(uuid()) @db.Uuid
+  centerId               String              @db.Uuid
+  therapyPlanId          String              @db.Uuid
+  /// The assessment goal it was copied from, for traceability. Not a foreign key:
+  /// amending an assessment replaces its goal rows, and the plan keeps its own copy.
+  sourceAssessmentGoalId String?             @db.Uuid
+  categoryId             String?             @db.Uuid
+  title                  String
+  description            String?
+  priority               GoalPriority?
+  measurementType        GoalMeasurementType @default(NARRATIVE)
+  /// { unit?, scaleMin?, scaleMax? } as measurement.ts allows for the type
+  measurementConfig      Json?
+  /// Narrative baseline/target, or a note alongside a numeric value
+  baselineText           String?
+  baselineValue          Float?
+  targetText             String?
+  targetValue            Float?
+  targetDate             DateTime?           @db.Date
+  status                 TherapyGoalStatus   @default(NOT_STARTED)
+  statusChangedAt        DateTime?
+  statusChangedById      String?             @db.Uuid
+  notes                  String?
+  displayOrder           Int                 @default(0)
+  createdById            String              @db.Uuid
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  center          Center                @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyPlan     TherapyPlan           @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  category        TherapyGoalCategory?  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  statusChangedBy User?                 @relation("GoalStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: Restrict)
+  createdBy       User                  @relation("GoalCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  progress        TherapyGoalProgress[]
+
+  @@index([therapyPlanId, displayOrder])
+  @@index([categoryId])
+}
+
+/// One observation of a goal, append-only. A correction is a new entry pointing at the
+/// one it replaces (correctsId), so the original stays readable.
+model TherapyGoalProgress {
+  id               String             @id @default(uuid()) @db.Uuid
+  centerId         String             @db.Uuid
+  therapyPlanId    String             @db.Uuid
+  goalId           String             @db.Uuid
+  /// Center-local date of the observation
+  observationDate  DateTime           @db.Date
+  /// The goal's status as the clinician judged it at this observation, if recorded
+  goalStatus       TherapyGoalStatus?
+  /// Only for measured goals, in the goal's unit; checked against its configuration
+  measuredValue    Float?
+  observation      String?
+  correctsId       String?            @unique @db.Uuid
+  correctionReason String?
+  recordedById     String             @db.Uuid
+  createdAt        DateTime           @default(now())
+
+  center      Center               @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyPlan TherapyPlan          @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  goal        TherapyPlanGoal      @relation(fields: [goalId], references: [id], onDelete: Restrict)
+  corrects    TherapyGoalProgress? @relation("ProgressCorrection", fields: [correctsId], references: [id], onDelete: Restrict)
+  correctedBy TherapyGoalProgress? @relation("ProgressCorrection")
+  recordedBy  User                 @relation("ProgressRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([goalId, observationDate])
+  @@index([therapyPlanId, observationDate])
+}
+
+/// A periodic clinical review, confirmed when it's saved. Corrections keep the earlier
+/// content in TherapyPlanReviewAmendment.
+model TherapyPlanReview {
+  id              String                @id @default(uuid()) @db.Uuid
+  centerId        String                @db.Uuid
+  therapyPlanId   String                @db.Uuid
+  /// 1 for the plan's first review
+  number          Int
+  reviewDate      DateTime              @db.Date
+  /// The reviewing therapist's profile and signed-in account
+  therapistId     String                @db.Uuid
+  reviewedById    String                @db.Uuid
+  overallProgress ReviewOverallProgress
+  recommendation  ReviewRecommendation
+  observations    String?
+  goalSummary     String?
+  notes           String?
+  nextReviewDate  DateTime?             @db.Date
+  /// The goals (status, baseline, target, latest progress) as they stood at the review
+  goalSnapshot    Json
+  /// Plan frequency, duration and status at the review
+  planSnapshot    Json
+  completedAt     DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  center      Center                       @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyPlan TherapyPlan                  @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  therapist   Therapist                    @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  reviewedBy  User                         @relation("PlanReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  amendments  TherapyPlanReviewAmendment[]
+
+  @@unique([therapyPlanId, number])
+}
+
+/// One correction of a review, append-only; previousContent is the review before it.
+model TherapyPlanReviewAmendment {
+  id              String   @id @default(uuid()) @db.Uuid
+  centerId        String   @db.Uuid
+  reviewId        String   @db.Uuid
+  number          Int
+  reason          String
+  /// Labels of what changed, never values
+  changedFields   Json
+  previousContent Json
+  amendedById     String   @db.Uuid
+  amendedAt       DateTime @default(now())
+
+  center    Center            @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  review    TherapyPlanReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  amendedBy User              @relation("ReviewAmendedBy", fields: [amendedById], references: [id], onDelete: Restrict)
+
+  @@unique([reviewId, number])
+}
+
+/// The plan's history from activation on, append-only: status changes, revisions,
+/// reassignments and goal changes, each with the values before and after.
+model TherapyPlanRevision {
+  id               String           @id @default(uuid()) @db.Uuid
+  centerId         String           @db.Uuid
+  therapyPlanId    String           @db.Uuid
+  /// 1 for the plan's first entry
+  number           Int
+  event            TherapyPlanEvent
+  /// Labels of what changed, e.g. "Frequency", never values
+  changedFields    Json             @default("[]")
+  previousSnapshot Json?
+  newSnapshot      Json?
+  reason           String?
+  /// The goal an event is about, for GOAL_ADDED / GOAL_UPDATED
+  goalId           String?          @db.Uuid
+  /// The review that led to this change, when there was one
+  reviewId         String?          @db.Uuid
+  revisedById      String           @db.Uuid
+  revisedAt        DateTime         @default(now())
+
+  center      Center      @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyPlan TherapyPlan @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  revisedBy   User        @relation("PlanRevisedBy", fields: [revisedById], references: [id], onDelete: Restrict)
+
+  @@unique([therapyPlanId, number])
+}
+
+// ── Packages ────────────────────────────────────────────────────────────────
+// A package is a commercial offering: a number of sessions, valid for a period, at a
+// price, usable for one or more therapy types (one shared pool of sessions). It never
+// books appointments, recommends treatment (that's a therapy plan) or takes payment
+// (that's billing).
+//
+// An enrollment is one patient's purchase of a package. It copies the package's terms
+// when it's made (sessions, validity, rules, price, discount), so later catalog changes
+// never touch it; a trigger in the packages migration refuses changes to those terms.
+// Buying again is a new enrollment, never a top-up of an old one.
+//
+// Session entitlement is tracked by two append-only records, never by editing a number:
+// - PackageSessionLedger: credits (the initial allocation, bonuses, corrections) and
+//   debits (consumed sessions, manual debits), each with who, when and why. A reversal
+//   is a new entry pointing at the consumption it undoes.
+// - PackageSessionReservation: a session held for one booked appointment. It ends as
+//   CONSUMED (the session was charged) or RELEASED (it wasn't).
+// The enrollment's totalSessions, consumedSessions and reservedSessions are a
+// projection of those rows kept by triggers in the migration, and a CHECK keeps
+// consumed + reserved ≤ total, so concurrent bookings can't overdraw a package.
+
+/// A period length, for package validity and usage limits.
+enum PackagePeriodUnit {
+  DAY
+  WEEK
+  /// Calendar months (see packages/rules.ts for days a month lacks)
+  MONTH
+}
+
+/// When an enrollment's validity starts.
+enum PackageActivationPolicy {
+  /// The day it's enrolled
+  ENROLLMENT_DATE
+  /// A date staff choose when enrolling, past or future
+  FIXED_DATE
+  /// The day of the first session it pays for; PENDING until then
+  FIRST_SESSION
+}
+
+enum PackageDiscountType {
+  NONE
+  /// An amount off the catalog price
+  FIXED
+  /// A percentage off the catalog price
+  PERCENTAGE
+  /// A different agreed price, set directly
+  PRICE_OVERRIDE
+}
+
+/// The stored lifecycle state. EXPIRED and EXHAUSTED aren't stored: the API derives
+/// them from the dates and balances on every read (packages/rules.ts), so they can
+/// never be out of date.
+enum PackageEnrollmentState {
+  /// Validity hasn't started: first-session activation that hasn't happened yet
+  PENDING
+  ACTIVE
+  CANCELLED
+}
+
+enum PackageLedgerMovement {
+  INITIAL_ALLOCATION
+  /// A courtesy session, e.g. a goodwill bonus
+  BONUS_CREDIT
+  /// A correction in the patient's favour
+  MANUAL_CREDIT
+  /// A correction against the balance
+  MANUAL_DEBIT
+  /// One session charged for an appointment
+  SESSION_CONSUMPTION
+  /// Undoes one SESSION_CONSUMPTION (reversesId)
+  CONSUMPTION_REVERSAL
+}
+
+/// Why a session was charged.
+enum PackageChargeReason {
+  COMPLETED
+  NO_SHOW
+  LATE_CANCELLATION
+}
+
+enum PackageReservationStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+}
+
+enum PackageReleaseReason {
+  /// Cancelled in time, or late where the package doesn't charge late cancellations
+  APPOINTMENT_CANCELLED
+  /// A no-show the package doesn't charge
+  NO_SHOW_NOT_CHARGED
+  /// Taken off the appointment by staff, or moved to another package
+  REMOVED
+  ENROLLMENT_CANCELLED
+}
+
+model TherapyPackage {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  centerId               String                  @db.Uuid
+  /// Unique per center, stored upper-cased, e.g. PKG-0004 or OT-MONTHLY
+  code                   String
+  name                   String
+  description            String?
+  /// Sessions included; one shared pool for every eligible therapy type
+  sessionCount           Int
+  /// A suggestion for booking; appointments keep their own length
+  defaultDurationMinutes Int?
+  price                  Decimal                 @db.Decimal(12, 2)
+  validityValue          Int
+  validityUnit           PackagePeriodUnit
+  /// Preselected when enrolling
+  activationPolicy       PackageActivationPolicy @default(ENROLLMENT_DATE)
+  /// Optional: at most usageLimitCount sessions per usageLimitPeriod. Off when null.
+  usageLimitCount        Int?
+  usageLimitPeriod       PackagePeriodUnit?
+  /// Assessments can use it too; by default only therapy sessions do
+  coversAssessments      Boolean                 @default(false)
+  /// Whether a no-show uses up a session
+  chargeNoShow           Boolean                 @default(false)
+  /// Whether a cancellation inside the center's cutoff uses up a session
+  chargeLateCancellation Boolean                 @default(false)
+  /// Inactive packages can't be newly enrolled in; existing enrollments are unaffected
+  isActive               Boolean                 @default(true)
+  displayOrder           Int                     @default(0)
+  createdById            String                  @db.Uuid
+  updatedById            String?                 @db.Uuid
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  center       Center                       @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  createdBy    User                         @relation("PackageCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy    User?                        @relation("PackageUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  therapyTypes PackageEligibleTherapyType[]
+  enrollments  PackageEnrollment[]
+
+  @@unique([centerId, code])
+  @@index([centerId, isActive, displayOrder])
+}
+
+/// A therapy type a package can be used for. Removed with the package (only unused
+/// packages can be deleted); enrollments keep their own copy.
+model PackageEligibleTherapyType {
+  packageId     String @db.Uuid
+  therapyTypeId String @db.Uuid
+
+  package     TherapyPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  therapyType TherapyType    @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+
+  @@id([packageId, therapyTypeId])
+  @@index([therapyTypeId])
+}
+
+/// One patient's purchase of a package. Never deleted; cancelling keeps the row and
+/// its history. Its price is what was agreed, not what was paid: payment is billing's.
+model PackageEnrollment {
+  id            String  @id @default(uuid()) @db.Uuid
+  centerId      String  @db.Uuid
+  /// Generated per center from CenterSequence, e.g. PE-0012. The purchase reference
+  /// billing will invoice against.
+  code          String
+  patientId     String  @db.Uuid
+  /// The catalog package it was bought from, for reporting. Its current terms don't apply.
+  packageId     String  @db.Uuid
+  /// The treatment it was bought for, if any (same patient). Never changes the plan.
+  therapyPlanId String? @db.Uuid
+  /// The enrollment this one renews; balances are never carried over
+  renewedFromId String? @db.Uuid
+  /// Client-generated key: the same request sent twice creates one enrollment
+  requestId     String? @db.Uuid
+
+  // The package's terms when enrolled; fixed from then on.
+  packageName            String
+  packageCode            String
+  /// Name, code, description and therapy types (id, name, code) as they were
+  packageSnapshot        Json
+  /// Sessions purchased: the initial allocation
+  sessionCount           Int
+  defaultDurationMinutes Int?
+  validityValue          Int
+  validityUnit           PackagePeriodUnit
+  activationPolicy       PackageActivationPolicy
+  usageLimitCount        Int?
+  usageLimitPeriod       PackagePeriodUnit?
+  coversAssessments      Boolean
+  chargeNoShow           Boolean
+  chargeLateCancellation Boolean
+
+  // Agreed price. Money is NUMERIC, never floating point.
+  currency      String
+  catalogPrice  Decimal             @db.Decimal(12, 2)
+  discountType  PackageDiscountType @default(NONE)
+  /// The amount (FIXED) or percentage (PERCENTAGE) given; null otherwise
+  discountValue Decimal?            @db.Decimal(12, 2)
+  finalPrice    Decimal             @db.Decimal(12, 2)
+
+  /// Center-local dates, both included. Null until a first-session enrollment
+  /// activates; fixed once set.
+  startDate          DateTime?              @db.Date
+  endDate            DateTime?              @db.Date
+  /// The end date was chosen by staff rather than computed from the validity
+  customEndDate      Boolean                @default(false)
+  state              PackageEnrollmentState
+  activatedAt        DateTime?
+  notes              String?
+  cancelledAt        DateTime?
+  cancelledById      String?                @db.Uuid
+  cancellationReason String?
+
+  // Kept by triggers from the ledger and reservations; never written by the API.
+  /// Purchased plus credits minus manual debits
+  totalSessions    Int @default(0)
+  /// Charged sessions, net of reversals
+  consumedSessions Int @default(0)
+  /// Sessions held by booked appointments
+  reservedSessions Int @default(0)
+
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  center       Center                         @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient      Patient                        @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  package      TherapyPackage                 @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  therapyPlan  TherapyPlan?                   @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  renewedFrom  PackageEnrollment?             @relation("EnrollmentRenewal", fields: [renewedFromId], references: [id], onDelete: Restrict)
+  renewals     PackageEnrollment[]            @relation("EnrollmentRenewal")
+  createdBy    User                           @relation("EnrollmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  cancelledBy  User?                          @relation("EnrollmentCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  therapyTypes PackageEnrollmentTherapyType[]
+  ledger       PackageSessionLedger[]
+  reservations PackageSessionReservation[]
+  appointments Appointment[]
+
+  @@unique([centerId, code])
+  @@unique([centerId, requestId])
+  @@index([centerId, createdAt])
+  @@index([centerId, state, endDate])
+  @@index([patientId, createdAt])
+  @@index([packageId])
+  @@index([therapyPlanId])
+}
+
+/// A therapy type an enrollment can be used for, copied from its package.
+model PackageEnrollmentTherapyType {
+  enrollmentId  String @db.Uuid
+  therapyTypeId String @db.Uuid
+
+  enrollment  PackageEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  therapyType TherapyType       @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+
+  @@id([enrollmentId, therapyTypeId])
+  @@index([therapyTypeId])
+}
+
+/// One credit or debit of an enrollment's sessions, append-only. Credits are positive,
+/// debits negative. A session is consumed at most once per appointment and a
+/// consumption reversed at most once (unique indexes in the migration).
+model PackageSessionLedger {
+  id            String                @id @default(uuid()) @db.Uuid
+  centerId      String                @db.Uuid
+  enrollmentId  String                @db.Uuid
+  movement      PackageLedgerMovement
+  quantity      Int
+  /// The appointment charged, for SESSION_CONSUMPTION
+  appointmentId String?               @db.Uuid
+  /// The reservation the consumption came from
+  reservationId String?               @db.Uuid
+  /// The SESSION_CONSUMPTION a CONSUMPTION_REVERSAL undoes
+  reversesId    String?               @unique @db.Uuid
+  chargeReason  PackageChargeReason?
+  /// Why, for manual movements and reversals
+  reason        String?
+  /// Client-generated key: the same adjustment sent twice is recorded once
+  requestId     String?               @db.Uuid
+  createdById   String                @db.Uuid
+  createdAt     DateTime              @default(now())
+
+  center      Center                     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  enrollment  PackageEnrollment          @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  appointment Appointment?               @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  reservation PackageSessionReservation? @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  reverses    PackageSessionLedger?      @relation("LedgerReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversedBy  PackageSessionLedger?      @relation("LedgerReversal")
+  createdBy   User                       @relation("LedgerCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([enrollmentId, requestId])
+  @@index([enrollmentId, createdAt])
+  @@index([appointmentId])
+}
+
+/// A session held for one booked appointment, until it's charged (CONSUMED) or not
+/// (RELEASED). At most one ACTIVE reservation per appointment (migration). Ended
+/// reservations never change.
+model PackageSessionReservation {
+  id            String                   @id @default(uuid()) @db.Uuid
+  centerId      String                   @db.Uuid
+  enrollmentId  String                   @db.Uuid
+  appointmentId String                   @db.Uuid
+  quantity      Int                      @default(1)
+  status        PackageReservationStatus @default(ACTIVE)
+  /// The appointment's center-local date, kept in step when it's rescheduled; used for
+  /// validity and usage limits
+  sessionDate   DateTime                 @db.Date
+  createdById   String                   @db.Uuid
+  createdAt     DateTime                 @default(now())
+  releasedAt    DateTime?
+  releasedById  String?                  @db.Uuid
+  releaseReason PackageReleaseReason?
+  consumedAt    DateTime?
+
+  center      Center                 @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  enrollment  PackageEnrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  appointment Appointment            @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  createdBy   User                   @relation("ReservationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  releasedBy  User?                  @relation("ReservationReleasedBy", fields: [releasedById], references: [id], onDelete: Restrict)
+  movements   PackageSessionLedger[]
+
+  @@index([enrollmentId, status, sessionDate])
+  @@index([appointmentId])
 }

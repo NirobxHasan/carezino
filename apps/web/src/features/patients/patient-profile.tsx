@@ -8,7 +8,9 @@ import {
   CalendarPlus,
   CheckCircle2,
   ClipboardList,
+  ListChecks,
   Pencil,
+  Ticket,
   Trash2,
   UserCheck,
   UserPlus,
@@ -34,6 +36,9 @@ import { cn } from '@/lib/utils';
 import { appointmentLinks } from '../appointments/appointment-display';
 import { AppointmentsPanel } from '../appointments/appointments-panel';
 import { PatientAssessmentsPanel } from '../assessments/patient-assessments';
+import { packageLinks } from '../packages/package-display';
+import { PatientPackagesPanel } from '../packages/patient-packages';
+import { PatientPlansPanel } from '../therapy-plans/patient-plans';
 import { patientLinks, statusActions, usePatientDialogs } from './patient-actions';
 import { ConsentCard, ContactsCard } from './patient-contacts';
 import {
@@ -206,7 +211,8 @@ function RegisteredBanner({ patient }: { patient: PatientDetail }) {
   );
 }
 
-type Tab = 'overview' | 'appointments' | 'assessments';
+type Tab = 'overview' | 'appointments' | 'assessments' | 'plans' | 'packages';
+const TABS: Exclude<Tab, 'overview'>[] = ['appointments', 'assessments', 'plans', 'packages'];
 
 function PatientProfile() {
   const { id, patient, fallback } = usePatientPage();
@@ -217,12 +223,11 @@ function PatientProfile() {
   const tabs = {
     appointments: can('appointments.read_own'),
     assessments: can('assessments.read_own'),
+    plans: can('therapy_plans.read_own'),
+    packages: can('package_enrollments.read'),
   };
-  const requested = searchParams.get('tab');
-  const tab: Tab =
-    (requested === 'appointments' || requested === 'assessments') && tabs[requested]
-      ? requested
-      : 'overview';
+  const requested = TABS.find((t) => t === searchParams.get('tab'));
+  const tab: Tab = requested && tabs[requested] ? requested : 'overview';
   const general = useGeneralSettings();
   const { changeStatus, remove, dialogs } = usePatientDialogs({
     afterDelete: () => router.push(patientLinks.list),
@@ -268,6 +273,13 @@ function PatientProfile() {
                 </Link>
               </Button>
             )}
+            {can('package_enrollments.create') && patient.status !== 'INACTIVE' && (
+              <Button variant="secondary" asChild>
+                <Link href={packageLinks.enroll({ patientId: id })}>
+                  <Ticket /> Enroll in package
+                </Link>
+              </Button>
+            )}
             {can('patients.update') && (
               <Button variant="secondary" asChild>
                 <Link href={patientLinks.edit(id)}>
@@ -298,9 +310,9 @@ function PatientProfile() {
           </>
         }
       />
-      {/* Plans, notes, packages and billing get their own tabs here once those modules
-          exist; until then there's nothing real to show. */}
-      {tabs.appointments || tabs.assessments ? (
+      {/* Notes and billing get their own tabs here once those modules exist; until then
+          there's nothing real to show. */}
+      {tabs.appointments || tabs.assessments || tabs.plans || tabs.packages ? (
         <Tabs
           value={tab}
           onValueChange={(next) => {
@@ -324,6 +336,16 @@ function PatientProfile() {
                 <ClipboardList /> Assessments
               </TabsTrigger>
             )}
+            {tabs.plans && (
+              <TabsTrigger value="plans">
+                <ListChecks /> Therapy plans
+              </TabsTrigger>
+            )}
+            {tabs.packages && (
+              <TabsTrigger value="packages">
+                <Ticket /> Packages
+              </TabsTrigger>
+            )}
           </TabsList>
           <TabsContent value="overview">
             <Overview patient={patient} />
@@ -334,6 +356,12 @@ function PatientProfile() {
           </TabsContent>
           <TabsContent value="assessments">
             <PatientAssessmentsPanel patientId={id} />
+          </TabsContent>
+          <TabsContent value="plans">
+            <PatientPlansPanel patientId={id} />
+          </TabsContent>
+          <TabsContent value="packages">
+            <PatientPackagesPanel patientId={id} canEnroll={patient.status !== 'INACTIVE'} />
           </TabsContent>
         </Tabs>
       ) : (

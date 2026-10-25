@@ -15,6 +15,11 @@ const TABS: { href: string; label: string; permission: Permission }[] = [
     label: 'Assessment templates',
     permission: 'assessment_templates.read',
   },
+  {
+    href: '/settings/goal-categories',
+    label: 'Goal categories',
+    permission: 'therapy_plans.read_own',
+  },
   { href: '/settings/working-hours', label: 'Working hours', permission: 'center_settings.read' },
   { href: '/settings/holidays', label: 'Holidays & closures', permission: 'center_settings.read' },
   { href: '/settings/scheduling', label: 'Scheduling', permission: 'center_settings.read' },

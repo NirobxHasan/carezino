@@ -34,7 +34,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
     <html lang="en" className={`${inter.variable} ${hindSiliguri.variable} h-full antialiased`}>
-      <body className="min-h-full">
+      {/* Browser extensions add attributes to <body> before React loads; this only
+          ignores attribute differences on this element, not its children. */}
+      <body className="min-h-full" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

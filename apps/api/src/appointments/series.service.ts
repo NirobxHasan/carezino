@@ -16,6 +16,8 @@ import {
   AppointmentSeriesStatus,
   AppointmentStatus,
 } from '../generated/prisma/enums';
+import { PackageSessions } from '../packages/sessions.service';
+import { assertCan } from '../patients/access';
 import { fieldError } from '../patients/contacts';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockTherapist } from '../therapists/access';
@@ -70,6 +72,7 @@ export class SeriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly booking: BookingService,
+    private readonly packages: PackageSessions,
   ) {}
 
   /** The rule as dates, rejecting rules that would book too much or nothing. */
@@ -243,6 +246,7 @@ export class SeriesService {
 
   /** Checks every date again under locks and books them in one transaction. */
   async create(tenant: TenantContext, dto: CreateSeriesDto) {
+    if (dto.packageEnrollmentId) assertCan(tenant, 'package_enrollments.read');
     const plan = await this.plan(tenant, dto);
     const { policy, ids, names } = plan;
     const conflictError = (occurrences: Occurrence[], message: string) => {
@@ -346,6 +350,26 @@ export class SeriesService {
         })),
         select: { id: true, startAt: true, endAt: true, allowOverlap: true },
       });
+      if (dto.packageEnrollmentId) {
+        // Every booked occurrence holds a session, or none is booked.
+        await this.packages.reserve(
+          tx,
+          tenant,
+          dto.packageEnrollmentId,
+          created.map((a) => ({
+            appointmentId: a.id,
+            patientId: ids.patientId,
+            therapyTypeId: plan.type.id,
+            type: dto.type,
+            startAt: a.startAt,
+          })),
+          policy,
+        );
+        await tx.appointment.updateMany({
+          where: { id: { in: created.map((a) => a.id) } },
+          data: { packageEnrollmentId: dto.packageEnrollmentId },
+        });
+      }
       await tx.appointmentHistory.createMany({
         data: created.map((a) => ({
           centerId: tenant.centerId,
@@ -366,6 +390,9 @@ export class SeriesService {
             type: dto.type,
             allowOverlap: a.allowOverlap,
             seriesId: series.id,
+            ...(dto.packageEnrollmentId && {
+              packageEnrollmentId: dto.packageEnrollmentId,
+            }),
           },
         })),
       });
@@ -525,6 +552,7 @@ export class SeriesService {
         });
         if (!count) continue;
         cancelled += 1;
+        await this.packages.settle(tx, tenant, t.id, 'CANCELLED', { late });
         await recordHistory(tx, tenant, {
           appointmentId: t.id,
           action: AppointmentHistoryAction.CANCELLED,

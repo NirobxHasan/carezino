@@ -51,6 +51,7 @@ import type {
   SeriesFrequency,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { PackagePicker } from '../packages/package-picker';
 import { PatientAvatar, PatientStatusBadge, formatPatientAge } from '../patients/patient-display';
 import {
   APPOINTMENT_TYPES,
@@ -222,6 +223,8 @@ function BookingForm() {
   );
   const [manualTime, setManualTime] = React.useState(false);
   const [notes, setNotes] = React.useState('');
+  /** The patient's package that pays for it; null books without one */
+  const [packageEnrollmentId, setPackageEnrollmentId] = React.useState<string | null>(null);
   const [recurrence, setRecurrence] = React.useState<Recurrence>(() => ({
     frequency: 'WEEKLY',
     interval: 1,
@@ -267,6 +270,7 @@ function BookingForm() {
         therapistId,
         durationMinutes: duration!,
         internalNotes: notes.trim() || undefined,
+        ...(packageEnrollmentId && { packageEnrollmentId }),
       }
     : null;
 
@@ -458,6 +462,18 @@ function BookingForm() {
               emptyText="No active therapist provides this therapy."
             />
           </Field>
+
+          <PackagePicker
+            className="sm:col-span-2"
+            params={
+              patient && therapyTypeId && date
+                ? { patientId: patient.id, therapyTypeId, type, date }
+                : null
+            }
+            value={packageEnrollmentId}
+            onChange={setPackageEnrollmentId}
+            error={fieldError('packageEnrollmentId')}
+          />
         </Section>
 
         <Section title="Scheduling">

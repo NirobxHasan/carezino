@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { FilePenLine, FileSearch, History, Lock, Printer } from 'lucide-react';
+import { FilePenLine, FileSearch, History, ListPlus, Lock, Printer } from 'lucide-react';
 
 import { RequirePermission } from '@/components/auth/require-permission';
 import { EmptyState, ErrorState, PageSkeleton } from '@/components/feedback/states';
@@ -33,6 +33,7 @@ import type { AssessmentDetail, AssessmentStatusDetail } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { TherapyTypeChip, useCenterFormat } from '../appointments/appointment-display';
 import { PATIENT_GENDERS, formatPatientAge } from '../patients/patient-display';
+import { planLinks } from '../therapy-plans/plan-display';
 import {
   ASSESSMENT_KINDS,
   AssessmentStatusBadge,
@@ -177,6 +178,14 @@ function AssessmentView({ assessment: a }: { assessment: AssessmentDetail }) {
               <Button variant="secondary" asChild>
                 <Link href={`${assessmentLinks.detail(a.id)}?amend=1`}>
                   <History /> Amend
+                </Link>
+              </Button>
+            )}
+            {/* Recommendations and goals become suggestions in a new draft plan. */}
+            {a.status !== 'DRAFT' && can('therapy_plans.create') && (
+              <Button asChild>
+                <Link href={planLinks.create({ patientId: p.id, assessmentId: a.id })}>
+                  <ListPlus /> Create therapy plan
                 </Link>
               </Button>
             )}

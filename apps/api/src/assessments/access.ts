@@ -29,10 +29,10 @@ export function ownAssessments(
 }
 
 /**
- * Patients in the caller's care: those with a (not cancelled) appointment or an
- * assessment with the caller's own therapist profile. Until patients can be assigned
- * to therapists, this is how therapists, who can't read the patient list, reach the
- * patients they actually see.
+ * Patients in the caller's care: those with a (not cancelled) appointment, an
+ * assessment or a therapy plan with the caller's own therapist profile. Until patients
+ * can be assigned to therapists, this is how therapists, who can't read the patient
+ * list, reach the patients they actually see.
  */
 export function patientsInCare(
   tenant: TenantContext,
@@ -49,6 +49,7 @@ export function patientsInCare(
         },
       },
       { assessments: { some: { therapist: mine } } },
+      { therapyPlans: { some: { therapist: mine } } },
     ],
   };
 }

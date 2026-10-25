@@ -16,6 +16,7 @@ import {
   AvailableSlotsQuery,
   CalendarQuery,
   CancelAppointmentDto,
+  ChangeAppointmentPackageDto,
   ChangeAppointmentStatusDto,
   CreateAppointmentDto,
   ListAppointmentsQuery,
@@ -96,6 +97,21 @@ export class AppointmentsController {
     @Body() dto: CancelAppointmentDto,
   ) {
     return this.appointments.cancel(tenant, id, dto);
+  }
+
+  /** Which package pays for an open appointment; null takes it off its package. */
+  @Patch(':id/package')
+  @RequirePermissions(
+    'appointments.read',
+    'appointments.update',
+    'package_enrollments.read',
+  )
+  setPackage(
+    @Tenant() tenant: TenantContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ChangeAppointmentPackageDto,
+  ) {
+    return this.appointments.setPackage(tenant, id, dto);
   }
 
   @Patch(':id/status')

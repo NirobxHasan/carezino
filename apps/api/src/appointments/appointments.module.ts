@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { CenterSettingsModule } from '../center-settings/center-settings.module';
+import { PackagesModule } from '../packages/packages.module';
 import { TherapistsModule } from '../therapists/therapists.module';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
@@ -9,7 +10,7 @@ import { SeriesController } from './series.controller';
 import { SeriesService } from './series.service';
 
 @Module({
-  imports: [CenterSettingsModule, TherapistsModule],
+  imports: [CenterSettingsModule, TherapistsModule, PackagesModule],
   controllers: [AppointmentsController, SeriesController],
   providers: [BookingService, AppointmentsService, SeriesService],
 })

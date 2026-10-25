@@ -106,8 +106,15 @@ function RescheduleForm({
   const fieldError = (field: string) =>
     isApiError(reschedule.error) ? reschedule.error.errors?.[field] : undefined;
   const conflict = conflictOf(reschedule.error);
+  // The new time is outside what the appointment's package covers (e.g. after it ends).
+  const packageProblem =
+    isApiError(reschedule.error, 409) &&
+    reschedule.error.code === 'PACKAGE_NOT_APPLICABLE' &&
+    reschedule.error.details.removable === true
+      ? reschedule.error.message
+      : null;
 
-  const submit = (allowOverlap = false) => {
+  const submit = (allowOverlap = false, withoutPackage = false) => {
     if (!date || !startTime) return;
     reschedule.mutate(
       {
@@ -120,6 +127,7 @@ function RescheduleForm({
           ...(!sameType && { therapyTypeId }),
           reason: reason.trim() || undefined,
           allowOverlap,
+          ...(withoutPackage && { packageEnrollmentId: null }),
         },
       },
       {
@@ -130,7 +138,9 @@ function RescheduleForm({
           onDone();
         },
         onError: (e) => {
-          if (!conflictOf(e) && !(isApiError(e) && e.errors)) toast.error(e.message);
+          const handled =
+            conflictOf(e) || (isApiError(e) && (e.errors || e.code === 'PACKAGE_NOT_APPLICABLE'));
+          if (!handled) toast.error(e.message);
         },
       },
     );
@@ -251,6 +261,21 @@ function RescheduleForm({
           placeholder="e.g. Guardian asked for the afternoon"
         />
       </Field>
+
+      {packageProblem && (
+        <div className="grid gap-2 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-[13px] text-warning-foreground">
+          <p>{packageProblem}. Keep the current time, or move it without the package.</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="justify-self-start"
+            loading={reschedule.isPending}
+            onClick={() => submit(false, true)}
+          >
+            Reschedule without the package
+          </Button>
+        </div>
+      )}
 
       {conflict && (
         <ConflictNotice

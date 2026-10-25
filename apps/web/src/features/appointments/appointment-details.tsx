@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, PageSkeleton } from '@/components/feedback/stat
 import { Field } from '@/components/forms/field';
 import { useBreadcrumbLabel } from '@/components/layout/breadcrumbs';
 import { PageHeader } from '@/components/layout/page-header';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -32,7 +33,11 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/sonner';
 import { Textarea } from '@/components/ui/textarea';
-import { useAppointment, useUpdateAppointment } from '@/lib/api/appointments';
+import {
+  useAppointment,
+  useSetAppointmentPackage,
+  useUpdateAppointment,
+} from '@/lib/api/appointments';
 import { isApiError } from '@/lib/api/client';
 import { formatPhone } from '@/lib/format';
 import { useSession } from '@/lib/session';
@@ -45,6 +50,13 @@ import type {
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ASSESSMENT_STATUSES, assessmentLinks } from '../assessments/assessment-display';
+import {
+  CHARGE_REASONS,
+  COVERAGE,
+  RELEASE_REASONS,
+  packageLinks,
+} from '../packages/package-display';
+import { PackagePicker } from '../packages/package-picker';
 import { relationshipLabel } from '../patients/patient-display';
 import { therapistLinks } from '../therapists/therapist-actions';
 import { availableActions, useAppointmentDialogs } from './appointment-actions';
@@ -227,6 +239,72 @@ function EditDialog({
  * Everything about one appointment: when, who, what, its series and history, with the
  * actions it allows now. Used by the details page and the calendar's side sheet.
  */
+/**
+ * Chooses, changes or removes the package paying for an open appointment. The old one's
+ * held session is given back; the new one must cover it like a new booking.
+ */
+function PackageDialog({
+  appointment: a,
+  open,
+  onOpenChange,
+}: {
+  appointment: AppointmentDetail;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const current = a.package?.coverage === 'HELD' ? a.package.enrollmentId : null;
+  const [value, setValue] = React.useState<string | null>(current);
+  const mutation = useSetAppointmentPackage();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Package for this appointment</DialogTitle>
+          <DialogDescription>
+            The package holds one session until the appointment is completed or cancelled.
+          </DialogDescription>
+        </DialogHeader>
+        <PackagePicker
+          params={{
+            patientId: a.patient.id,
+            therapyTypeId: a.therapyType.id,
+            type: a.type,
+            date: a.date,
+            appointmentId: a.id,
+          }}
+          value={value}
+          onChange={setValue}
+        />
+        {isApiError(mutation.error) && (
+          <p className="text-sm text-danger-foreground">{mutation.error.message}</p>
+        )}
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            loading={mutation.isPending}
+            disabled={value === current}
+            onClick={() =>
+              mutation.mutate(
+                { id: a.id, packageEnrollmentId: value },
+                {
+                  onSuccess: () => {
+                    toast.success(value ? 'Package set' : 'Package removed');
+                    onOpenChange(false);
+                  },
+                },
+              )
+            }
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function AppointmentDetails({
   appointment: a,
   variant = 'page',
@@ -239,6 +317,9 @@ export function AppointmentDetails({
   const instant = useInstant();
   const { open, dialogs } = useAppointmentDialogs();
   const [editing, setEditing] = React.useState(false);
+  const [choosingPackage, setChoosingPackage] = React.useState(false);
+  // Dialogs are transient: close them when the page is hidden by a navigation.
+  React.useLayoutEffect(() => () => setChoosingPackage(false), []);
   const actions = availableActions(a);
   const contact = a.primaryContact;
   const sheet = variant === 'sheet';
@@ -346,6 +427,43 @@ export function AppointmentDetails({
           {a.assessment ? ASSESSMENT_STATUSES[a.assessment.status].label : 'Not started'}
         </Detail>
       )}
+      {(a.package || a.actions.changePackage) && (
+        <Detail label="Package">
+          {a.package ? (
+            <span className="flex flex-col items-start gap-1">
+              {can('package_enrollments.read') ? (
+                <Link
+                  href={packageLinks.enrollment(a.package.enrollmentId)}
+                  className="rounded font-medium hover:underline focus-ring"
+                >
+                  {a.package.name}
+                </Link>
+              ) : (
+                <span className="font-medium">{a.package.name}</span>
+              )}
+              <span className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                <Badge tone={COVERAGE[a.package.coverage].tone}>
+                  {COVERAGE[a.package.coverage].label}
+                </Badge>
+                {a.package.chargeReason && CHARGE_REASONS[a.package.chargeReason]}
+                {a.package.releaseReason && RELEASE_REASONS[a.package.releaseReason]}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">None: paid per session</span>
+          )}
+          {a.actions.changePackage && (
+            <Button
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-xs"
+              onClick={() => setChoosingPackage(true)}
+            >
+              {a.package?.coverage === 'HELD' ? 'Change package' : 'Choose a package'}
+            </Button>
+          )}
+        </Detail>
+      )}
       {a.series && (
         <Detail label="Recurring">
           {a.series.position &&
@@ -412,6 +530,9 @@ export function AppointmentDetails({
           </section>
         </div>
         {editing && <EditDialog appointment={a} open onOpenChange={setEditing} />}
+        {choosingPackage && (
+          <PackageDialog appointment={a} open onOpenChange={setChoosingPackage} />
+        )}
         {dialogs}
       </>
     );
@@ -449,6 +570,7 @@ export function AppointmentDetails({
         </Card>
       </div>
       {editing && <EditDialog appointment={a} open onOpenChange={setEditing} />}
+      {choosingPackage && <PackageDialog appointment={a} open onOpenChange={setChoosingPackage} />}
       {dialogs}
     </>
   );

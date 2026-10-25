@@ -13,11 +13,13 @@ import { throttlerOptions } from './auth/throttle';
 import { CenterSettingsModule } from './center-settings/center-settings.module';
 import { CentersModule } from './centers/centers.module';
 import { CommonModule } from './common/common.module';
+import { PackagesModule } from './packages/packages.module';
 import { PatientsModule } from './patients/patients.module';
 import { PlatformModule } from './platform/platform.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StaffModule } from './staff/staff.module';
 import { TherapistsModule } from './therapists/therapists.module';
+import { TherapyPlansModule } from './therapy-plans/therapy-plans.module';
 import { TherapyTypesModule } from './therapy-types/therapy-types.module';
 
 @Module({
@@ -36,6 +38,8 @@ import { TherapyTypesModule } from './therapy-types/therapy-types.module';
     PatientsModule,
     AppointmentsModule,
     AssessmentsModule,
+    TherapyPlansModule,
+    PackagesModule,
   ],
   controllers: [AppController],
   providers: [

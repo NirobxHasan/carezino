@@ -572,6 +572,8 @@ export interface AppointmentActions {
   reschedule: boolean;
   cancel: boolean;
   edit: boolean;
+  /** Choosing, changing or removing the package that pays for it */
+  changePackage: boolean;
   /** Cancelling now would count as a late cancellation */
   lateCancellation: boolean;
 }
@@ -612,6 +614,8 @@ export interface AppointmentItem {
   lateCancellation: boolean;
   cancellationReason: CancellationReason | null;
   cancelledAt: ISODateTime | null;
+  /** The package enrollment it's assigned to, if any */
+  packageEnrollmentId: ID | null;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
   actions: AppointmentActions;
@@ -665,6 +669,8 @@ export interface AppointmentHistoryEntry {
 export interface AppointmentDetail extends AppointmentItem {
   /** The assessment recording this booking, if any */
   assessment: { id: ID; status: AssessmentRecordStatus } | null;
+  /** The package paying for it, if any. No prices or balances. */
+  package: AppointmentPackage | null;
   bufferMinutes: number;
   internalNotes: string | null;
   cancellationNote: string | null;
@@ -1254,6 +1260,291 @@ export interface AssessmentPatientOption {
   age: PatientAge | null;
 }
 
+// ── Therapy plans (served by the API) ───────────────────────────────────────
+// A plan is the intended treatment for one patient in one service. It never books,
+// sells or bills anything; see apps/api/src/therapy-plans.
+
+export type TherapyPlanStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'DISCONTINUED';
+export type PlanPeriodUnit = 'DAY' | 'WEEK' | 'MONTH';
+export type TherapyGoalStatus =
+  'NOT_STARTED' | 'IN_PROGRESS' | 'ACHIEVED' | 'ON_HOLD' | 'DISCONTINUED';
+export type GoalMeasurementType =
+  'NARRATIVE' | 'PERCENTAGE' | 'COUNT' | 'DURATION' | 'FREQUENCY' | 'RATING_SCALE' | 'CUSTOM';
+export type DurationUnit = 'SECONDS' | 'MINUTES' | 'HOURS';
+export type ReviewOverallProgress =
+  'SIGNIFICANT' | 'MODERATE' | 'MINIMAL' | 'NONE' | 'REGRESSION' | 'NOT_ENOUGH_INFORMATION';
+export type ReviewRecommendation =
+  | 'CONTINUE'
+  | 'MODIFY'
+  | 'INCREASE_FREQUENCY'
+  | 'DECREASE_FREQUENCY'
+  | 'PAUSE'
+  | 'COMPLETE'
+  | 'REFER_FOR_ASSESSMENT';
+export type TherapyPlanEvent =
+  | 'ACTIVATED'
+  | 'PAUSED'
+  | 'RESUMED'
+  | 'COMPLETED'
+  | 'DISCONTINUED'
+  | 'REVISED'
+  | 'THERAPIST_REASSIGNED'
+  | 'GOAL_ADDED'
+  | 'GOAL_UPDATED';
+
+export interface MeasurementConfig {
+  unit?: string;
+  scaleMin?: number;
+  scaleMax?: number;
+}
+
+/** What the caller may do with a plan now; the API still checks each request */
+export interface PlanActions {
+  view: boolean;
+  edit: boolean;
+  discard: boolean;
+  activate: boolean;
+  pause: boolean;
+  resume: boolean;
+  complete: boolean;
+  discontinue: boolean;
+  revise: boolean;
+  review: boolean;
+  recordProgress: boolean;
+  manageGoals: boolean;
+  reassign: boolean;
+}
+
+/** A row of GET /therapy-plans */
+export interface TherapyPlanItem {
+  id: ID;
+  /** e.g. TP-0007 */
+  code: string;
+  title: string;
+  status: TherapyPlanStatus;
+  patient: { id: ID; code: string; fullName: string; photoUrl: string | null; isDeleted: boolean };
+  therapyType: TherapyTypeRef & { isActive: boolean };
+  therapist: {
+    id: ID;
+    code: string;
+    fullName: string;
+    isActive: boolean;
+    isDeleted: boolean;
+    isYou: boolean;
+  };
+  frequency: {
+    sessionsPerPeriod: number | null;
+    unit: PlanPeriodUnit | null;
+    durationMinutes: number | null;
+    /** "3 sessions per week" */
+    label: string | null;
+  };
+  startDate: ISODate;
+  targetEndDate: ISODate | null;
+  nextReviewDate: ISODate | null;
+  reviewState: 'OVERDUE' | 'DUE_SOON' | null;
+  sourceAssessmentId: ID | null;
+  /** Null without access to the clinical content */
+  goalSummary: ({ total: number } & Record<TherapyGoalStatus, number>) | null;
+  revision: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  actions: PlanActions;
+}
+
+export interface GoalProgressEntry {
+  id: ID;
+  goalId: ID;
+  observationDate: ISODate;
+  goalStatus: TherapyGoalStatus | null;
+  measuredValue: number | null;
+  observation: string | null;
+  correctsId: ID | null;
+  correctionReason: string | null;
+  /** Replaced by a later correction; kept for the record */
+  isCorrected: boolean;
+  correctedById: ID | null;
+  recordedBy: UserRef;
+  createdAt: ISODateTime;
+}
+
+export interface PlanGoal {
+  id: ID;
+  title: string;
+  description: string | null;
+  category: { id: ID; name: string; isActive: boolean } | null;
+  priority: GoalPriority | null;
+  measurementType: GoalMeasurementType;
+  measurementConfig: MeasurementConfig | null;
+  baseline: { value: number | null; text: string | null };
+  target: { value: number | null; text: string | null };
+  targetDate: ISODate | null;
+  status: TherapyGoalStatus;
+  statusChangedAt: ISODateTime | null;
+  statusChangedBy: UserRef | null;
+  notes: string | null;
+  displayOrder: number;
+  sourceAssessmentGoalId: ID | null;
+  latestProgress: GoalProgressEntry | null;
+  progressCount: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export interface PlanReviewItem {
+  id: ID;
+  number: number;
+  reviewDate: ISODate;
+  overallProgress: ReviewOverallProgress;
+  recommendation: ReviewRecommendation;
+  nextReviewDate: ISODate | null;
+  therapist: { id: ID; fullName: string; isYou: boolean };
+  reviewedBy: UserRef;
+  completedAt: ISODateTime;
+  updatedAt: ISODateTime;
+  amendmentCount: number;
+}
+
+/** A goal as it stood at a review */
+export interface ReviewGoalSnapshot {
+  id: ID;
+  title: string;
+  category: string | null;
+  priority: GoalPriority | null;
+  status: TherapyGoalStatus;
+  measurementType: GoalMeasurementType;
+  measurementConfig: MeasurementConfig | null;
+  baseline: { value: number | null; text: string | null };
+  target: { value: number | null; text: string | null };
+  targetDate: ISODate | null;
+  latestProgress: {
+    observationDate: ISODate;
+    measuredValue: number | null;
+    goalStatus: TherapyGoalStatus | null;
+    observation: string | null;
+  } | null;
+  progressCount: number;
+}
+
+export interface PlanReviewContent {
+  reviewDate: ISODate;
+  overallProgress: ReviewOverallProgress;
+  recommendation: ReviewRecommendation;
+  observations: string | null;
+  goalSummary: string | null;
+  notes: string | null;
+  nextReviewDate: ISODate | null;
+}
+
+/** GET /therapy-plans/:id/reviews/:reviewId */
+export interface PlanReviewDetail extends PlanReviewItem {
+  therapyPlanId: ID;
+  observations: string | null;
+  goalSummary: string | null;
+  notes: string | null;
+  goalSnapshot: ReviewGoalSnapshot[];
+  planSnapshot: {
+    status: TherapyPlanStatus;
+    frequency: string | null;
+    durationMinutes: number | null;
+    nextReviewDate: ISODate | null;
+    targetEndDate: ISODate | null;
+  };
+  amendments: {
+    number: number;
+    reason: string;
+    changedFields: string[];
+    previousContent: PlanReviewContent;
+    amendedAt: ISODateTime;
+    amendedBy: UserRef;
+  }[];
+  actions: { amend: boolean };
+}
+
+export interface PlanHistoryEntry {
+  number: number;
+  event: TherapyPlanEvent;
+  /** Labels of what changed, never values */
+  changedFields: string[];
+  previousSnapshot: Record<string, unknown> | null;
+  newSnapshot: Record<string, unknown> | null;
+  reason: string | null;
+  goalId: ID | null;
+  reviewId: ID | null;
+  revisedAt: ISODateTime;
+  revisedBy: UserRef;
+}
+
+interface TherapyPlanDetailBase extends TherapyPlanItem {
+  reviewInterval: { value: number | null; unit: PlanPeriodUnit | null };
+  activatedAt: ISODateTime | null;
+  activatedBy: UserRef | null;
+  pausedAt: ISODateTime | null;
+  completedAt: ISODateTime | null;
+  discontinuedAt: ISODateTime | null;
+  createdBy: UserRef;
+}
+
+/** GET /therapy-plans/:id with clinical access */
+export interface TherapyPlanDetail extends TherapyPlanDetailBase {
+  clinicalAccess: true;
+  treatmentFocus: string | null;
+  clinicalNotes: string | null;
+  additionalInstructions: string | null;
+  statusReason: string | null;
+  completionSummary: string | null;
+  completedBy: UserRef | null;
+  discontinuedBy: UserRef | null;
+  updatedBy: UserRef | null;
+  sourceAssessment: {
+    id: ID;
+    type: AssessmentKind;
+    status: AssessmentRecordStatus;
+    assessmentDate: ISODate;
+    therapyType: TherapyTypeRef & { isActive: boolean };
+    therapist: { id: ID; fullName: string };
+  } | null;
+  goals: PlanGoal[];
+  reviews: PlanReviewItem[];
+  history: PlanHistoryEntry[];
+}
+
+/** GET /therapy-plans/:id for callers who may only see that it exists and its schedule */
+export interface TherapyPlanStatusDetail extends TherapyPlanDetailBase {
+  clinicalAccess: false;
+  goals: [];
+  reviews: [];
+  history: [];
+}
+
+/** GET /therapy-plans/assessment-options: completed assessments to start a plan from */
+export interface PlanAssessmentOption {
+  id: ID;
+  type: AssessmentKind;
+  status: AssessmentRecordStatus;
+  assessmentDate: ISODate;
+  summary: string | null;
+  suggestedReviewDate: ISODate | null;
+  therapyType: TherapyTypeRef;
+  therapist: { id: ID; fullName: string };
+  recommendations: AssessmentRecommendation[];
+  goals: (AssessmentGoal & { id: ID })[];
+  therapyPlans: { id: ID; code: string; status: TherapyPlanStatus; therapyTypeId: ID }[];
+}
+
+/** GET /therapy-goal-categories */
+export interface GoalCategory {
+  id: ID;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  displayOrder: number;
+  therapyType: (TherapyTypeRef & { isActive: boolean }) | null;
+  goalCount: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
 // ── Packages & billing ──────────────────────────────────────────────────────
 
 /** How the package is billed. Independent of how sessions recur on the calendar. */
@@ -1357,4 +1648,186 @@ export interface Paginated<T> {
   total: number;
   page: number;
   pageSize: number;
+}
+
+// ── Packages ────────────────────────────────────────────────────────────────
+
+/** Money as the API sends it: an exact two-decimal string, e.g. "9000.00" */
+export type Money = string;
+
+export type PackagePeriodUnit = 'DAY' | 'WEEK' | 'MONTH';
+export type PackageActivationPolicy = 'ENROLLMENT_DATE' | 'FIXED_DATE' | 'FIRST_SESSION';
+export type PackageDiscountType = 'NONE' | 'FIXED' | 'PERCENTAGE' | 'PRICE_OVERRIDE';
+/** EXPIRED and EXHAUSTED are derived from dates and balances on every read */
+export type EnrollmentStatus = 'PENDING' | 'ACTIVE' | 'EXHAUSTED' | 'EXPIRED' | 'CANCELLED';
+export type PackageMovementType =
+  | 'INITIAL_ALLOCATION'
+  | 'BONUS_CREDIT'
+  | 'MANUAL_CREDIT'
+  | 'MANUAL_DEBIT'
+  | 'SESSION_CONSUMPTION'
+  | 'CONSUMPTION_REVERSAL';
+export type PackageChargeReason = 'COMPLETED' | 'NO_SHOW' | 'LATE_CANCELLATION';
+export type PackageReleaseReason =
+  'APPOINTMENT_CANCELLED' | 'NO_SHOW_NOT_CHARGED' | 'REMOVED' | 'ENROLLMENT_CANCELLED';
+export type AdjustmentType =
+  'BONUS_CREDIT' | 'MANUAL_CREDIT' | 'MANUAL_DEBIT' | 'CONSUMPTION_REVERSAL';
+
+export interface PackageTherapyType {
+  id: ID;
+  name: string;
+  code: string;
+  color: string | null;
+  isActive: boolean;
+}
+
+/** GET /packages, /packages/:id */
+export interface TherapyPackageItem {
+  id: ID;
+  code: string;
+  name: string;
+  description: string | null;
+  sessionCount: number;
+  defaultDurationMinutes: number | null;
+  price: Money;
+  validityValue: number;
+  validityUnit: PackagePeriodUnit;
+  activationPolicy: PackageActivationPolicy;
+  usageLimitCount: number | null;
+  usageLimitPeriod: PackagePeriodUnit | null;
+  usageLimit: { count: number; period: PackagePeriodUnit } | null;
+  coversAssessments: boolean;
+  chargeNoShow: boolean;
+  chargeLateCancellation: boolean;
+  isActive: boolean;
+  displayOrder: number;
+  therapyTypes: PackageTherapyType[];
+  enrollmentCount: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  actions: {
+    edit: boolean;
+    activate: boolean;
+    deactivate: boolean;
+    duplicate: boolean;
+    delete: boolean;
+    enroll: boolean;
+  };
+}
+
+export interface EnrollmentSessions {
+  purchased: number;
+  /** Purchased plus credits minus manual debits */
+  total: number;
+  consumed: number;
+  reserved: number;
+  remaining: number;
+  availableToBook: number;
+}
+
+/** GET /package-enrollments */
+export interface EnrollmentItem {
+  id: ID;
+  code: string;
+  status: EnrollmentStatus;
+  patient: { id: ID; code: string; fullName: string; photoUrl: string | null; isDeleted: boolean };
+  package: { id: ID; name: string; code: string };
+  therapyTypes: PackageTherapyType[];
+  therapyPlan: { id: ID; code: string; status: TherapyPlanStatus } | null;
+  activationPolicy: PackageActivationPolicy;
+  startDate: ISODate | null;
+  endDate: ISODate | null;
+  /** Days from today to the last valid day; negative after it */
+  daysLeft: number | null;
+  expiringSoon: boolean;
+  sessions: EnrollmentSessions;
+  currency: string;
+  finalPrice: Money;
+  renewedFromId: ID | null;
+  cancelledAt: ISODateTime | null;
+  createdAt: ISODateTime;
+  actions: { renew: boolean; cancel: boolean; adjust: boolean };
+}
+
+export interface EnrollmentAppointment {
+  id: ID;
+  status: AppointmentRecordStatus;
+  type: AppointmentType;
+  date: ISODate;
+  startTime: ClockTime;
+  therapist: { id: ID; fullName: string };
+  therapyType: { id: ID; name: string; code: string; color: string | null };
+}
+
+/** GET /package-enrollments/:id */
+export interface EnrollmentDetail extends EnrollmentItem {
+  sessions: EnrollmentSessions & {
+    additionalCredits: number;
+    manualDebits: number;
+    reversed: number;
+  };
+  terms: {
+    sessionCount: number;
+    defaultDurationMinutes: number | null;
+    validity: { value: number; unit: PackagePeriodUnit };
+    usageLimit: { count: number; period: PackagePeriodUnit } | null;
+    coversAssessments: boolean;
+    chargeNoShow: boolean;
+    chargeLateCancellation: boolean;
+  };
+  pricing: {
+    currency: string;
+    catalogPrice: Money;
+    discountType: PackageDiscountType;
+    discountValue: Money | null;
+    /** Catalog price minus the agreed price; negative when set higher */
+    discountAmount: Money;
+    finalPrice: Money;
+  };
+  catalogPackage: { id: ID; code: string; name: string; isActive: boolean };
+  customEndDate: boolean;
+  activatedAt: ISODateTime | null;
+  notes: string | null;
+  cancellationReason: string | null;
+  cancelledBy: { id: ID; fullName: string } | null;
+  createdBy: { id: ID; fullName: string };
+  updatedAt: ISODateTime;
+  therapyPlan: { id: ID; code: string; title: string; status: TherapyPlanStatus } | null;
+  renewedFrom: { id: ID; code: string; startDate: ISODate | null; endDate: ISODate | null } | null;
+  renewals: { id: ID; code: string; createdAt: ISODateTime }[];
+  /** Booked sessions holding one of its sessions, earliest first */
+  upcoming: EnrollmentAppointment[];
+}
+
+/** One entry of GET /package-enrollments/:id/ledger, oldest first */
+export interface EnrollmentMovement {
+  id: string;
+  type: PackageMovementType | 'SESSION_RESERVED' | 'RESERVATION_RELEASED';
+  quantity: number;
+  at: ISODateTime;
+  by: { id: ID; fullName: string } | null;
+  reason: string | null;
+  chargeReason: PackageChargeReason | null;
+  releaseReason: PackageReleaseReason | null;
+  reversesId: ID | null;
+  reversed: boolean;
+  appointment: EnrollmentAppointment | null;
+}
+
+/** GET /package-enrollments/options: a package and whether it can pay for a session */
+export interface EnrollmentOption extends EnrollmentItem {
+  eligible: boolean;
+  problems: { reason: string; message: string }[];
+  /** The appointment being changed already uses it */
+  current: boolean;
+}
+
+export interface AppointmentPackage {
+  enrollmentId: ID;
+  code: string;
+  name: string;
+  coverage: 'HELD' | 'CHARGED' | 'REVERSED' | 'RELEASED';
+  chargeReason: PackageChargeReason | null;
+  releaseReason: PackageReleaseReason | null;
+  consumptionId: ID | null;
 }

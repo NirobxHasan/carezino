@@ -9,7 +9,7 @@ export default function Page() {
   return (
     <ModulePlaceholder
       title="Clinical records"
-      description="Therapy plans and session notes. Assessments have their own section."
+      description="Session notes. Assessments and therapy plans have their own sections."
       icon={ClipboardList}
     />
   );

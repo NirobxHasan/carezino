@@ -92,6 +92,64 @@ export const PERMISSIONS = [
   'assessments.complete',
   /** Correcting a completed assessment, with a reason; the earlier content is kept */
   'assessments.amend',
+  /**
+   * Every therapy plan's patient, therapy, therapist, frequency, dates and status,
+   * without goals, progress or reviews: for scheduling and operational oversight
+   */
+  'therapy_plans.read_status',
+  /** Every therapy plan's clinical content. Never editing. */
+  'therapy_plans.read',
+  /**
+   * Clinical content of the caller's own plans (their linked therapist profile, drafts
+   * included) and of non-draft plans of patients in their care. Also the route minimum.
+   */
+  'therapy_plans.read_own',
+  /**
+   * The clinical writes below only ever apply to plans the caller is the responsible
+   * therapist of, whoever else can read them.
+   */
+  'therapy_plans.create',
+  /** Starting a plan that isn't based on a completed assessment */
+  'therapy_plans.create_without_assessment',
+  /** Editing a draft plan and its goals, and discarding it */
+  'therapy_plans.update',
+  'therapy_plans.activate',
+  /** Recording periodic clinical reviews and correcting them */
+  'therapy_plans.review',
+  /** Changing an active plan's details, with a reason kept in its history */
+  'therapy_plans.revise',
+  /** Pausing, resuming, completing and discontinuing */
+  'therapy_plans.manage_status',
+  /** Handing a plan to another therapist, e.g. when someone leaves. No clinical access. */
+  'therapy_plans.reassign',
+  /** Adding goals to and changing goals of an active plan, with a reason */
+  'therapy_goals.manage',
+  'therapy_goals.record_progress',
+  /** The center's goal categories (Settings) */
+  'therapy_goal_categories.manage',
+  /** The package catalog, with prices */
+  'packages.read',
+  'packages.create',
+  /** Editing a package's details and terms; enrollments keep the terms they were bought on */
+  'packages.update',
+  /** Activating and deactivating packages for new enrollments */
+  'packages.deactivate',
+  /** Deleting packages nobody has enrolled in */
+  'packages.delete',
+  /**
+   * Every enrollment of the center with its agreed price, balance and usage history.
+   * Also choosing a patient's package when booking.
+   */
+  'package_enrollments.read',
+  /** Enrolling a patient on the package's own terms */
+  'package_enrollments.create',
+  /** Buying a package again for the same patient, as a new enrollment */
+  'package_enrollments.renew',
+  /** Discounts, an agreed price, or a session count or end date other than the package's */
+  'package_enrollments.override_terms',
+  'package_enrollments.cancel',
+  /** Bonus and correcting credits, debits, and reversing a charged session, with a reason */
+  'package_enrollments.adjust',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -153,6 +211,42 @@ const WRITE_OWN_ASSESSMENTS: Permission[] = [
   'assessments.amend',
 ];
 
+/**
+ * Planning and running treatment. Like assessments, every write is limited to plans
+ * whose responsible therapist is the caller's own profile.
+ */
+const WRITE_OWN_PLANS: Permission[] = [
+  'therapy_plans.read_own',
+  'therapy_plans.create',
+  'therapy_plans.create_without_assessment',
+  'therapy_plans.update',
+  'therapy_plans.activate',
+  'therapy_plans.review',
+  'therapy_plans.revise',
+  'therapy_plans.manage_status',
+  'therapy_goals.manage',
+  'therapy_goals.record_progress',
+];
+
+/** Which plans exist, for whom and how often, never their goals or progress. */
+const PLAN_STATUS: Permission[] = [
+  'therapy_plans.read_status',
+  // Route minimum: without a linked therapist profile it adds no clinical access.
+  'therapy_plans.read_own',
+];
+
+/**
+ * Front desk selling: seeing the catalog, enrolling patients on the package's terms,
+ * renewing, and choosing a package when booking. Discounts, cancellations and balance
+ * corrections stay with managers and administrators.
+ */
+const SELL_PACKAGES: Permission[] = [
+  'packages.read',
+  'package_enrollments.read',
+  'package_enrollments.create',
+  'package_enrollments.renew',
+];
+
 /** Seeing that assessments exist and where they stand, never what they say. */
 const ASSESSMENT_STATUS: Permission[] = [
   'assessments.read_status',
@@ -161,8 +255,9 @@ const ASSESSMENT_STATUS: Permission[] = [
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  // Everything, including reading (and printing) every assessment. Clinical writes stay
-  // limited to their own assessments, for admins who also see patients as therapists.
+  // Everything, including reading (and printing) every assessment and therapy plan.
+  // Clinical writes stay limited to their own assessments and plans, for admins who also
+  // see patients as therapists.
   [Role.CENTER_ADMIN]: PERMISSIONS,
   // Operational lead: sees the team and runs therapist schedules, but center settings,
   // access control and deleting therapist profiles stay with admins.
@@ -182,6 +277,16 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'appointments.cancel_late',
     'assessment_templates.read',
     ...ASSESSMENT_STATUS,
+    ...PLAN_STATUS,
+    'therapy_plans.reassign',
+    // The catalog and every enrollment change except deleting packages.
+    ...SELL_PACKAGES,
+    'packages.create',
+    'packages.update',
+    'packages.deactivate',
+    'package_enrollments.override_terms',
+    'package_enrollments.cancel',
+    'package_enrollments.adjust',
   ],
   [Role.RECEPTIONIST]: [
     'center.read',
@@ -191,11 +296,15 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     ...MANAGE_PATIENTS,
     ...MANAGE_APPOINTMENTS,
     ...ASSESSMENT_STATUS,
+    ...PLAN_STATUS,
+    ...SELL_PACKAGES,
   ],
   // Their own therapist profile, schedule and appointments only, never colleagues'
   // records. They can confirm, complete and mark no-shows on their own sessions; booking,
   // moving and cancelling stay with the front desk. They assess the patients they see
-  // (src/assessments/access.ts decides which), without access to the patient list.
+  // (src/assessments/access.ts decides which), without access to the patient list,
+  // and plan and review the treatment of those patients. No package permissions: their
+  // appointments show which package covers a session, never prices or balances.
   [Role.THERAPIST]: [
     'center.read',
     ...READ_CONFIGURATION,
@@ -204,6 +313,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'appointments.read_own',
     'appointments.manage_status',
     ...WRITE_OWN_ASSESSMENTS,
+    ...WRITE_OWN_PLANS,
   ],
 };
 

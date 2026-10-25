@@ -15,7 +15,15 @@ import type { Prisma } from '../generated/prisma/client';
 import {
   AppointmentHistoryAction,
   AppointmentStatus,
+  PackageLedgerMovement,
+  PackageReleaseReason,
+  PackageReservationStatus,
 } from '../generated/prisma/enums';
+import {
+  PackageSessions,
+  type BookedSession,
+  type SessionPolicy,
+} from '../packages/sessions.service';
 import { assertCan } from '../patients/access';
 import { primaryContactOf } from '../patients/contacts';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,6 +42,7 @@ import type {
   AvailableSlotsQuery,
   CalendarQuery,
   CancelAppointmentDto,
+  ChangeAppointmentPackageDto,
   ChangeAppointmentStatusDto,
   CreateAppointmentDto,
   ListAppointmentsQuery,
@@ -65,6 +74,7 @@ export const itemSelect = {
   lateCancellation: true,
   cancellationReason: true,
   cancelledAt: true,
+  packageEnrollmentId: true,
   createdAt: true,
   updatedAt: true,
   patient: {
@@ -129,6 +139,24 @@ const detailSelect = {
     },
   },
   assessment: { select: { id: true, status: true } },
+  packageEnrollment: {
+    select: { id: true, code: true, packageName: true },
+  },
+  // The latest reservation says whether the package still holds a session for it.
+  packageReservations: {
+    select: { enrollmentId: true, status: true, releaseReason: true },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+  },
+  packageMovements: {
+    where: { movement: PackageLedgerMovement.SESSION_CONSUMPTION },
+    select: {
+      id: true,
+      enrollmentId: true,
+      chargeReason: true,
+      reversedBy: { select: { id: true } },
+    },
+  },
   history: {
     select: {
       id: true,
@@ -193,6 +221,9 @@ function allowedActions(row: ItemRow, view: View) {
       (!late || can('appointments.cancel_late')),
     edit:
       row.status !== AppointmentStatus.CANCELLED && can('appointments.update'),
+    /** Choosing, changing or removing the package that pays for it */
+    changePackage:
+      open && can('appointments.update') && can('package_enrollments.read'),
     /** Cancelling now would count as a late cancellation */
     lateCancellation: late,
   };
@@ -233,10 +264,49 @@ export function toItem(row: ItemRow, view: View) {
     lateCancellation: row.lateCancellation,
     cancellationReason: row.cancellationReason,
     cancelledAt: row.cancelledAt,
+    /** The package enrollment it's assigned to, if any (see the detail for coverage) */
+    packageEnrollmentId: row.packageEnrollmentId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     actions: allowedActions(row, view),
   };
+}
+
+/**
+ * Which package pays for the appointment and where that stands: HELD (a session is
+ * reserved), CHARGED (one was used), REVERSED (charged, then given back) or RELEASED
+ * (it was given back, e.g. on cancellation). No prices or balances: therapists see this.
+ */
+function packageCoverage(row: DetailRow) {
+  const enrollment = row.packageEnrollment;
+  if (!enrollment) return null;
+  const charge = row.packageMovements.find(
+    (m) => m.enrollmentId === enrollment.id,
+  );
+  const reservation = row.packageReservations.find(
+    (r) => r.enrollmentId === enrollment.id,
+  );
+  return {
+    enrollmentId: enrollment.id,
+    code: enrollment.code,
+    name: enrollment.packageName,
+    coverage: charge
+      ? charge.reversedBy
+        ? ('REVERSED' as const)
+        : ('CHARGED' as const)
+      : reservation?.status === PackageReservationStatus.ACTIVE
+        ? ('HELD' as const)
+        : ('RELEASED' as const),
+    chargeReason: charge?.chargeReason ?? null,
+    releaseReason: charge ? null : (reservation?.releaseReason ?? null),
+    /** The consumption entry, for reversing it from the enrollment */
+    consumptionId: charge?.id ?? null,
+  };
+}
+
+/** Locks an appointment row until the transaction ends, before its package is changed. */
+async function lockAppointment(tx: Tx, id: string) {
+  await tx.$queryRaw`SELECT id FROM "Appointment" WHERE id = ${id}::uuid FOR UPDATE`;
 }
 
 /** The booking as history records it: times as staff saw them, people by ID and name. */
@@ -326,6 +396,7 @@ export class AppointmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly booking: BookingService,
+    private readonly packages: PackageSessions,
   ) {}
 
   async view(tenant: TenantContext, policy?: Policy): Promise<View> {
@@ -580,6 +651,8 @@ export class AppointmentsService {
       cancelledBy: row.cancelledBy,
       /** The assessment recording this booking, if any (status only; see assessments) */
       assessment: row.assessment,
+      /** The package paying for it, if any, and whether it holds or used a session */
+      package: packageCoverage(row),
       series: row.series && {
         id: row.series.id,
         status: row.series.status,
@@ -671,6 +744,7 @@ export class AppointmentsService {
   // ── Booking ───────────────────────────────────────────────────────────────
 
   async create(tenant: TenantContext, dto: CreateAppointmentDto) {
+    if (dto.packageEnrollmentId) assertCan(tenant, 'package_enrollments.read');
     const policy = await this.booking.policy(tenant);
     const date = this.booking.date(dto.date, 'date');
     const startAt = this.booking.instant(date, dto.startTime, policy.timeZone);
@@ -731,6 +805,15 @@ export class AppointmentsService {
         },
         select: { id: true },
       });
+      if (dto.packageEnrollmentId) {
+        await this.attachPackage(tx, tenant, dto.packageEnrollmentId, policy, {
+          appointmentId: row.id,
+          patientId: patient.id,
+          therapyTypeId: type.id,
+          type: dto.type,
+          startAt,
+        });
+      }
       await recordHistory(tx, tenant, {
         appointmentId: row.id,
         action: AppointmentHistoryAction.CREATED,
@@ -748,9 +831,130 @@ export class AppointmentsService {
           ),
           type: dto.type,
           allowOverlap,
+          ...(dto.packageEnrollmentId && {
+            packageEnrollmentId: dto.packageEnrollmentId,
+          }),
         },
       });
       return row.id;
+    });
+    return this.get(tenant, id);
+  }
+
+  /**
+   * Holds a session of the enrollment for the appointment, then records the link. The
+   * enrollment is checked (same center and patient, covered, valid, sessions free)
+   * before the appointment points at it.
+   */
+  private async attachPackage(
+    tx: Tx,
+    tenant: TenantContext,
+    enrollmentId: string,
+    policy: SessionPolicy,
+    session: BookedSession,
+  ) {
+    await this.packages.reserve(tx, tenant, enrollmentId, [session], policy);
+    await tx.appointment.update({
+      where: { id: session.appointmentId },
+      data: { packageEnrollmentId: enrollmentId },
+    });
+  }
+
+  /**
+   * After a move: keeps the package if it still covers the appointment (left out), or
+   * takes it off (null) or switches it (an ID). Returns whether the package changed.
+   */
+  private async repackage(
+    tx: Tx,
+    tenant: TenantContext,
+    current: { packageEnrollmentId: string | null },
+    change: string | null | undefined,
+    policy: SessionPolicy,
+    session: BookedSession,
+  ) {
+    if (change === undefined || change === current.packageEnrollmentId) {
+      await this.packages.move(tx, tenant, session, policy);
+      return false;
+    }
+    await this.packages.release(
+      tx,
+      tenant,
+      session.appointmentId,
+      PackageReleaseReason.REMOVED,
+    );
+    if (change) {
+      await this.attachPackage(tx, tenant, change, policy, session);
+    } else {
+      await tx.appointment.update({
+        where: { id: session.appointmentId },
+        data: { packageEnrollmentId: null },
+      });
+    }
+    return true;
+  }
+
+  /**
+   * Chooses, changes or removes the package paying for an open appointment. The old
+   * one's held session is given back; the new one must cover it like a new booking.
+   */
+  async setPackage(
+    tenant: TenantContext,
+    id: string,
+    dto: ChangeAppointmentPackageDto,
+  ) {
+    const current = await this.current(tenant, id);
+    if (!OPEN_STATUSES.includes(current.status)) {
+      throw notOpen(current.status, 'changed');
+    }
+    const held = await this.prisma.packageSessionReservation.findFirst({
+      where: { appointmentId: id, status: PackageReservationStatus.ACTIVE },
+      select: { enrollmentId: true },
+    });
+    if (
+      dto.packageEnrollmentId === current.packageEnrollmentId &&
+      (held?.enrollmentId ?? null) === dto.packageEnrollmentId
+    ) {
+      return this.get(tenant, id);
+    }
+    const policy = await this.booking.policy(tenant);
+    await this.prisma.$transaction(async (tx) => {
+      // Same lock order as booking: patient, appointment, then enrollments.
+      await lockPatient(tx, current.patientId);
+      await lockAppointment(tx, id);
+      const { count } = await tx.appointment.updateMany({
+        where: {
+          id,
+          centerId: tenant.centerId,
+          status: current.status,
+          startAt: current.startAt,
+        },
+        data: { updatedById: tenant.userId },
+      });
+      if (!count) throw changedMeanwhile();
+      await this.packages.release(tx, tenant, id, PackageReleaseReason.REMOVED);
+      if (dto.packageEnrollmentId) {
+        await this.attachPackage(tx, tenant, dto.packageEnrollmentId, policy, {
+          appointmentId: id,
+          patientId: current.patientId,
+          therapyTypeId: current.therapyTypeId,
+          type: current.type,
+          startAt: current.startAt,
+        });
+      } else {
+        await tx.appointment.update({
+          where: { id },
+          data: { packageEnrollmentId: null },
+        });
+      }
+      await recordHistory(tx, tenant, {
+        appointmentId: id,
+        action: AppointmentHistoryAction.UPDATED,
+        previousValues: { packageEnrollmentId: current.packageEnrollmentId },
+        newValues: {
+          fields: ['package'],
+          packageEnrollmentId: dto.packageEnrollmentId,
+        },
+      });
     });
     return this.get(tenant, id);
   }
@@ -770,6 +974,7 @@ export class AppointmentsService {
         startAt: true,
         endAt: true,
         durationMinutes: true,
+        packageEnrollmentId: true,
         therapist: { select: { id: true, fullName: true } },
         therapyType: { select: { id: true, name: true } },
       },
@@ -829,6 +1034,10 @@ export class AppointmentsService {
     const therapyTypeId = dto.therapyTypeId ?? current.therapyTypeId;
     const sameType = therapyTypeId === current.therapyTypeId;
     if (!sameType) assertCan(tenant, 'appointments.update');
+    const packageChange = dto.packageEnrollmentId;
+    if (packageChange !== undefined) {
+      assertCan(tenant, 'package_enrollments.read');
+    }
     const policy = await this.booking.policy(tenant);
     const date = this.booking.date(dto.date, 'date');
     const startAt = this.booking.instant(date, dto.startTime, policy.timeZone);
@@ -858,6 +1067,15 @@ export class AppointmentsService {
       therapist.id === current.therapistId &&
       sameType
     ) {
+      // Only the package changed: that has its own operation.
+      if (
+        packageChange !== undefined &&
+        packageChange !== current.packageEnrollmentId
+      ) {
+        return this.setPackage(tenant, id, {
+          packageEnrollmentId: packageChange,
+        });
+      }
       return this.get(tenant, id);
     }
     const names = {
@@ -889,6 +1107,7 @@ export class AppointmentsService {
         names,
         dto.allowOverlap,
       );
+      await lockAppointment(tx, id);
       const { count } = await tx.appointment.updateMany({
         where: {
           id,
@@ -910,21 +1129,44 @@ export class AppointmentsService {
         },
       });
       if (!count) throw changedMeanwhile();
+      // The held package session moves with it, or the package changes as asked.
+      const repackaged = await this.repackage(
+        tx,
+        tenant,
+        current,
+        packageChange,
+        policy,
+        {
+          appointmentId: id,
+          patientId: patient.id,
+          therapyTypeId: type.id,
+          type: current.type,
+          startAt,
+        },
+      );
       await recordHistory(tx, tenant, {
         appointmentId: id,
         action: AppointmentHistoryAction.RESCHEDULED,
-        previousValues: snapshot(current, policy.timeZone),
-        newValues: snapshot(
-          {
-            startAt,
-            endAt,
-            durationMinutes,
-            status: AppointmentStatus.SCHEDULED,
-            therapist,
-            therapyType: type,
-          },
-          policy.timeZone,
-        ),
+        previousValues: {
+          ...snapshot(current, policy.timeZone),
+          ...(repackaged && {
+            packageEnrollmentId: current.packageEnrollmentId,
+          }),
+        },
+        newValues: {
+          ...snapshot(
+            {
+              startAt,
+              endAt,
+              durationMinutes,
+              status: AppointmentStatus.SCHEDULED,
+              therapist,
+              therapyType: type,
+            },
+            policy.timeZone,
+          ),
+          ...(repackaged && { packageEnrollmentId: packageChange }),
+        },
         reason: dto.reason,
       });
     });
@@ -934,7 +1176,8 @@ export class AppointmentsService {
   /**
    * Cancels without deleting: the row, its history and its place in any series stay.
    * Inside the center's cutoff it counts as late and needs appointments.cancel_late.
-   * Packages and payments aren't touched here; those modules decide what late means.
+   * A held package session is given back, or charged when the package charges late
+   * cancellations and this one is late. Payments aren't touched.
    */
   async cancel(tenant: TenantContext, id: string, dto: CancelAppointmentDto) {
     const current = await this.current(tenant, id);
@@ -963,6 +1206,7 @@ export class AppointmentsService {
         },
       });
       if (!count) throw changedMeanwhile();
+      await this.packages.settle(tx, tenant, id, 'CANCELLED', { late });
       await recordHistory(tx, tenant, {
         appointmentId: id,
         action: AppointmentHistoryAction.CANCELLED,
@@ -978,7 +1222,11 @@ export class AppointmentsService {
     return this.get(tenant, id);
   }
 
-  /** Confirm, complete or mark a no-show, following the allowed transitions (rules.ts). */
+  /**
+   * Confirm, complete or mark a no-show, following the allowed transitions (rules.ts).
+   * Completing uses the held package session; a no-show uses it only if the package
+   * charges no-shows, and gives it back otherwise.
+   */
   async setStatus(
     tenant: TenantContext,
     id: string,
@@ -1006,6 +1254,11 @@ export class AppointmentsService {
         data: { status: dto.status, updatedById: tenant.userId },
       });
       if (!count) throw changedMeanwhile();
+      if (dto.status === AppointmentStatus.COMPLETED) {
+        await this.packages.settle(tx, tenant, id, 'COMPLETED');
+      } else if (dto.status === AppointmentStatus.NO_SHOW) {
+        await this.packages.settle(tx, tenant, id, 'NO_SHOW');
+      }
       await recordHistory(tx, tenant, {
         appointmentId: id,
         action: AppointmentHistoryAction.STATUS_CHANGED,

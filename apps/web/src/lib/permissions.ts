@@ -57,6 +57,31 @@ export const API_PERMISSIONS = [
   'assessments.update_draft',
   'assessments.complete',
   'assessments.amend',
+  'therapy_plans.read_status',
+  'therapy_plans.read',
+  'therapy_plans.read_own',
+  'therapy_plans.create',
+  'therapy_plans.create_without_assessment',
+  'therapy_plans.update',
+  'therapy_plans.activate',
+  'therapy_plans.review',
+  'therapy_plans.revise',
+  'therapy_plans.manage_status',
+  'therapy_plans.reassign',
+  'therapy_goals.manage',
+  'therapy_goals.record_progress',
+  'therapy_goal_categories.manage',
+  'packages.read',
+  'packages.create',
+  'packages.update',
+  'packages.deactivate',
+  'packages.delete',
+  'package_enrollments.read',
+  'package_enrollments.create',
+  'package_enrollments.renew',
+  'package_enrollments.override_terms',
+  'package_enrollments.cancel',
+  'package_enrollments.adjust',
 ] as const;
 
 export type ApiPermission = (typeof API_PERMISSIONS)[number];
@@ -66,8 +91,6 @@ export type ModulePermission =
   | 'dashboard.view'
   | 'clinical.view'
   | 'clinical.write'
-  | 'packages.view'
-  | 'packages.manage'
   | 'finance.view'
   | 'finance.manage'
   | 'reports.view';
@@ -78,8 +101,6 @@ const ALL_MODULES: ModulePermission[] = [
   'dashboard.view',
   'clinical.view',
   'clinical.write',
-  'packages.view',
-  'packages.manage',
   'finance.view',
   'finance.manage',
   'reports.view',
@@ -92,8 +113,8 @@ const ALL_MODULES: ModulePermission[] = [
 export const modulePermissions: Record<Role, ModulePermission[]> = {
   CENTER_ADMIN: ALL_MODULES,
   MANAGER: ALL_MODULES,
-  RECEPTIONIST: ['dashboard.view', 'packages.view', 'finance.view', 'finance.manage'],
-  THERAPIST: ['dashboard.view', 'clinical.view', 'clinical.write', 'packages.view'],
+  RECEPTIONIST: ['dashboard.view', 'finance.view', 'finance.manage'],
+  THERAPIST: ['dashboard.view', 'clinical.view', 'clinical.write'],
 };
 
 export const ROLES: Role[] = ['CENTER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'THERAPIST'];
@@ -109,7 +130,7 @@ export const roleDescriptions: Record<Role, string> = {
   CENTER_ADMIN: 'Full access, including center settings, staff and roles.',
   MANAGER: 'Runs day-to-day operations and sees the team. No access to settings or roles.',
   RECEPTIONIST: 'Front desk: registration, bookings and payments.',
-  THERAPIST: 'Their own schedule, patients, assessments and session notes.',
+  THERAPIST: 'Their own schedule, patients, assessments, therapy plans and session notes.',
 };
 
 function isApiPermission(permission: Permission): permission is ApiPermission {
