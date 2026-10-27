@@ -68,6 +68,20 @@ export const keys = {
   enrollmentLedger: (id: string) => ['package-enrollments', 'ledger', id] as const,
   patientEnrollments: (patientId: string) => ['package-enrollments', 'patient', patientId] as const,
   enrollmentOptions: (params: object) => ['package-enrollments', 'options', params] as const,
+  todaySessions: (params: object) => ['sessions', 'today', params] as const,
+  sessionList: (params: object) => ['sessions', 'list', params] as const,
+  session: (id: string) => ['sessions', 'detail', id] as const,
+  mySessions: ['sessions', 'mine'] as const,
+  patientSessions: (patientId: string, params: object) =>
+    ['sessions', 'patient', patientId, params] as const,
+  sessionNote: (id: string) => ['session-notes', 'detail', id] as const,
+  sessionNoteAmendment: (id: string, number: number) =>
+    ['session-notes', 'amendment', id, number] as const,
+  noteTemplateList: (params?: object) => ['session-note-templates', 'list', params ?? {}] as const,
+  noteTemplate: (id: string) => ['session-note-templates', 'detail', id] as const,
+  noteTemplateVersions: (id: string) => ['session-note-templates', 'versions', id] as const,
+  noteTemplateVersion: (id: string, versionId: string) =>
+    ['session-note-templates', 'version', id, versionId] as const,
   invoices: (params?: object) => ['invoices', params ?? {}] as const,
   payments: (params?: object) => ['payments', params ?? {}] as const,
   expenses: ['expenses'] as const,

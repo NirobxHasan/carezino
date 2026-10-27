@@ -31,6 +31,8 @@ const nextConfig: NextConfig = {
         destination: "/therapy-plans/:id?tab=reviews",
         permanent: false,
       },
+      // The clinical records placeholder became Sessions (attendance and session notes).
+      { source: "/clinical/:path*", destination: "/sessions", permanent: false },
     ];
   },
   async headers() {

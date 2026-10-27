@@ -114,7 +114,7 @@ function move<T>(list: T[], from: number, to: number) {
 }
 
 /** "definition.sections.1.fields.0.options" → "Functional assessment › Observations: …" */
-function describeErrors(errors: Record<string, string>, d: TemplateDefinition) {
+export function describeErrors(errors: Record<string, string>, d: TemplateDefinition) {
   return Object.entries(errors).map(([path, message]) => {
     const m = /sections\.(\d+)(?:\.fields\.(\d+))?/.exec(path);
     const section = m ? d.sections[Number(m[1])] : undefined;
@@ -143,11 +143,14 @@ function FieldDialog({
   field,
   takenKeys,
   lockedType,
+  noun,
   onSave,
   onClose,
 }: {
   /** Null: a new field */
   field: TemplateField | null;
+  /** What the form fills in, e.g. "assessments" */
+  noun: string;
   takenKeys: Set<string>;
   /** The type of this field in a published version, which it must keep */
   lockedType?: TemplateFieldType;
@@ -423,7 +426,7 @@ function FieldDialog({
             <Field
               label="Default answer"
               optional
-              helper="Filled in on new assessments; the therapist can change it."
+              helper={`Filled in on new ${noun}; the therapist can change it.`}
             >
               {choice ? (
                 <Select
@@ -513,16 +516,23 @@ export function FormOutline({ definition }: { definition: TemplateDefinition }) 
 
 // ── Builder ─────────────────────────────────────────────────────────────────
 
-function Builder({
-  template,
+/**
+ * Edits a draft form: sections, fields, options, order. Shared by assessment and session
+ * note templates; `published` is the form in use, whose fields must keep their types.
+ */
+export function FormBuilder({
+  published,
   definition,
   setDefinition,
   errors,
+  noun = 'assessments',
 }: {
-  template: AssessmentTemplateDetail;
+  published: TemplateDefinition | undefined;
   definition: TemplateDefinition;
   setDefinition: (d: TemplateDefinition) => void;
   errors: string[];
+  /** What the form fills in, e.g. "assessments" or "session notes" */
+  noun?: string;
 }) {
   const [selected, setSelected] = React.useState(0);
   const [editing, setEditing] = React.useState<{
@@ -533,7 +543,6 @@ function Builder({
   const sections = definition.sections;
   const current = sections[Math.min(selected, sections.length - 1)] as TemplateSection | undefined;
   const sectionIndex = Math.min(selected, sections.length - 1);
-  const published = template.published?.definition;
   const publishedTypes = new Map(
     (published?.sections ?? []).flatMap((s) => s.fields.map((f) => [f.key, f.type] as const)),
   );
@@ -736,8 +745,8 @@ function Builder({
                 <Plus /> Add field
               </Button>
               <p className="text-xs text-muted-foreground">
-                Removing a field only affects this version. Assessments filled in with earlier
-                versions keep their answers.
+                Removing a field only affects this version. {noun[0].toUpperCase() + noun.slice(1)}{' '}
+                filled in with earlier versions keep their answers.
               </p>
             </CardContent>
           </Card>
@@ -759,6 +768,7 @@ function Builder({
       {editing && current && (
         <FieldDialog
           field={editing.field}
+          noun={noun}
           takenKeys={keysOf(definition, published).fields}
           lockedType={editing.field ? publishedTypes.get(editing.field.key) : undefined}
           onClose={() => setEditing(null)}
@@ -791,13 +801,19 @@ function Builder({
   );
 }
 
-function Preview({ definition }: { definition: TemplateDefinition }) {
+export function FormPreview({
+  definition,
+  note = 'Every assessment also has a clinical summary, recommendations and initial goals after these sections.',
+}: {
+  definition: TemplateDefinition;
+  /** What the record has besides the form */
+  note?: string;
+}) {
   const [values, setValues] = React.useState<DraftAnswers>({});
   return (
     <div className="grid gap-4">
       <p className="text-[13px] text-muted-foreground">
-        How therapists will see the form. Nothing you enter here is saved. Every assessment also has
-        a clinical summary, recommendations and initial goals after these sections.
+        How therapists will see the form. Nothing you enter here is saved. {note}
       </p>
       {definition.sections.map((s) => (
         <Card key={s.key}>
@@ -1181,8 +1197,8 @@ function TemplateBuilder({ template: t }: { template: AssessmentTemplateDetail }
         </TabsList>
         <TabsContent value="form">
           {editing ? (
-            <Builder
-              template={t}
+            <FormBuilder
+              published={t.published?.definition}
               definition={definition!}
               setDefinition={setDefinition}
               errors={publishErrors}
@@ -1206,7 +1222,7 @@ function TemplateBuilder({ template: t }: { template: AssessmentTemplateDetail }
           )}
         </TabsContent>
         <TabsContent value="preview">
-          <Preview key={JSON.stringify(shown)} definition={shown} />
+          <FormPreview key={JSON.stringify(shown)} definition={shown} />
         </TabsContent>
         <TabsContent value="versions">
           <Versions template={t} />

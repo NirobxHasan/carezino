@@ -1017,7 +1017,7 @@ export function createSeed() {
       id: 'nt_1',
       title: 'Session notes pending',
       body: 'Some completed sessions from the last two days still need notes.',
-      href: '/clinical?tab=notes',
+      href: '/sessions?note=PENDING',
       createdAt: subDays(now, 0).toISOString(),
       read: false,
     },

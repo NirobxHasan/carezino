@@ -991,6 +991,7 @@ describe('Appointments (e2e)', () => {
       await ok(
         s.admin.patch(`/appointments/${done.id}/status`, {
           status: 'COMPLETED',
+          attendance: 'PRESENT',
         }),
       );
       const cut = await ok<{
@@ -1026,6 +1027,7 @@ describe('Appointments (e2e)', () => {
       expect(confirmed.status).toBe('CONFIRMED');
       const early = await s.admin.patch(`/appointments/${future.id}/status`, {
         status: 'COMPLETED',
+        attendance: 'PRESENT',
       });
       expect(early.status).toBe(409);
       expect(early.body.code).toBe('APPOINTMENT_NOT_STARTED');
@@ -1046,6 +1048,7 @@ describe('Appointments (e2e)', () => {
       const done = await ok<Detail>(
         s.admin.patch(`/appointments/${past.id}/status`, {
           status: 'COMPLETED',
+          attendance: 'PRESENT',
         }),
       );
       expect(done.status).toBe('COMPLETED');

@@ -17,6 +17,7 @@ import { PackagesModule } from './packages/packages.module';
 import { PatientsModule } from './patients/patients.module';
 import { PlatformModule } from './platform/platform.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { SessionsModule } from './sessions/sessions.module';
 import { StaffModule } from './staff/staff.module';
 import { TherapistsModule } from './therapists/therapists.module';
 import { TherapyPlansModule } from './therapy-plans/therapy-plans.module';
@@ -40,6 +41,7 @@ import { TherapyTypesModule } from './therapy-types/therapy-types.module';
     AssessmentsModule,
     TherapyPlansModule,
     PackagesModule,
+    SessionsModule,
   ],
   controllers: [AppController],
   providers: [

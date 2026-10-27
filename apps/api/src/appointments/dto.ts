@@ -201,6 +201,11 @@ export const STATUS_CHANGES = [
 export class ChangeAppointmentStatusDto {
   @IsIn(STATUS_CHANGES, { message: 'Choose confirmed, completed or no-show' })
   status!: (typeof STATUS_CHANGES)[number];
+
+  /** COMPLETED only: the patient's attendance, when it isn't marked yet */
+  @IsOptional()
+  @IsIn(['PRESENT', 'LATE'], { message: 'Choose present or late' })
+  attendance?: 'PRESENT' | 'LATE';
 }
 
 export class UpdateAppointmentDto {

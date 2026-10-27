@@ -1,9 +1,12 @@
 import {
+  CalendarCheck,
   CalendarDays,
   ChartColumn,
   ClipboardList,
+  FileClock,
   LayoutDashboard,
   ListChecks,
+  NotebookPen,
   Package,
   Settings,
   Stethoscope,
@@ -47,6 +50,13 @@ export const navGroups: NavGroup[] = [
         // Therapists see their own sessions; front desk and managers see everyone's.
         permission: 'appointments.read_own',
       },
+      {
+        title: 'Today’s sessions',
+        href: '/sessions/today',
+        icon: CalendarCheck,
+        // The front desk's day: check-in, attendance and session status for everyone.
+        permission: 'sessions.read',
+      },
       { title: 'Patients', href: '/patients', icon: Users, permission: 'patients.read' },
       {
         title: 'Therapists',
@@ -60,6 +70,20 @@ export const navGroups: NavGroup[] = [
   {
     label: 'Clinical',
     items: [
+      {
+        title: 'My sessions',
+        href: '/my-sessions',
+        icon: NotebookPen,
+        // Therapists' own day and notes to write.
+        permission: 'session_notes.create',
+      },
+      {
+        title: 'Sessions',
+        href: '/sessions',
+        icon: FileClock,
+        // History: everyone's for front desk and managers, their own for therapists.
+        permission: 'sessions.read_own',
+      },
       {
         title: 'Assessments',
         href: '/assessments',
@@ -127,6 +151,11 @@ export const segmentLabels: Record<string, string> = {
   'assessment-templates': 'Assessment templates',
   'therapy-plans': 'Therapy plans',
   'goal-categories': 'Goal categories',
+  sessions: 'Sessions',
+  today: 'Today',
+  note: 'Note',
+  'my-sessions': 'My sessions',
+  'session-note-templates': 'Session note templates',
   reviews: 'Reviews',
   print: 'Print',
   new: 'New',
@@ -137,4 +166,9 @@ export const segmentLabels: Record<string, string> = {
 
 export function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** The most specific of `hrefs` the path is under, e.g. /sessions/today over /sessions. */
+export function activeHref(pathname: string, hrefs: string[]) {
+  return hrefs.filter((href) => isActive(pathname, href)).sort((a, b) => b.length - a.length)[0];
 }

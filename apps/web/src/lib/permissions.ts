@@ -82,6 +82,21 @@ export const API_PERMISSIONS = [
   'package_enrollments.override_terms',
   'package_enrollments.cancel',
   'package_enrollments.adjust',
+  'attendance.read',
+  'attendance.record',
+  'attendance.correct',
+  'sessions.read',
+  'sessions.read_own',
+  'sessions.complete',
+  'sessions.correct',
+  'session_notes.read',
+  'session_notes.read_own',
+  'session_notes.create',
+  'session_notes.update_draft',
+  'session_notes.complete',
+  'session_notes.amend',
+  'session_note_templates.read',
+  'session_note_templates.manage',
 ] as const;
 
 export type ApiPermission = (typeof API_PERMISSIONS)[number];

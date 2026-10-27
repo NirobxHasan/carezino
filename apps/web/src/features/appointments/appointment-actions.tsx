@@ -60,17 +60,17 @@ const STATUS_STEPS: Record<
   },
   complete: {
     status: 'COMPLETED',
-    title: 'Mark as completed?',
+    title: 'Complete this session?',
     description:
-      'Records that the session took place. Session notes, packages and billing are handled separately.',
-    label: 'Mark completed',
-    done: 'Marked as completed',
+      'Records that the session took place and uses a session of the package paying for it, if any. The session note is written separately.',
+    label: 'Complete session',
+    done: 'Session completed',
   },
   noShow: {
     status: 'NO_SHOW',
     title: 'Mark as no-show?',
     description:
-      'Records that the patient didn’t come. The time is released; the appointment and its history are kept.',
+      'Records that the patient didn’t come: they’re marked absent and the time is released. The appointment and its history are kept.',
     label: 'Mark no-show',
     done: 'Marked as no-show',
   },
@@ -87,7 +87,11 @@ export function useAppointmentDialogs() {
     appointment: AppointmentItem;
   } | null>(null);
   const setStatus = useSetAppointmentStatus();
+  // Completing needs attendance; when it isn't marked yet, it's asked here.
+  const [attendance, setAttendance] = React.useState<'PRESENT' | 'LATE'>('PRESENT');
   const close = () => setState(null);
+  const asksAttendance =
+    state?.action === 'complete' && state.appointment.attendance.status === 'NOT_MARKED';
   const step =
     state && state.action !== 'cancel' && state.action !== 'reschedule'
       ? STATUS_STEPS[state.action]
@@ -115,7 +119,11 @@ export function useAppointmentDialogs() {
         onConfirm={() => {
           if (!state || !step) return;
           setStatus.mutate(
-            { id: state.appointment.id, status: step.status },
+            {
+              id: state.appointment.id,
+              status: step.status,
+              attendance: asksAttendance ? attendance : undefined,
+            },
             {
               onSuccess: () => {
                 toast.success(step.done, { description: state.appointment.patient.fullName });
@@ -125,7 +133,21 @@ export function useAppointmentDialogs() {
             },
           );
         }}
-      />
+      >
+        {asksAttendance && (
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-medium">The patient’s attendance</legend>
+            <RadioGroup
+              value={attendance}
+              onValueChange={(v) => setAttendance(v as typeof attendance)}
+              className="sm:grid-cols-2"
+            >
+              <RadioCard value="PRESENT" title="Present" />
+              <RadioCard value="LATE" title="Late" description="Arrived late, but attended" />
+            </RadioGroup>
+          </fieldset>
+        )}
+      </ConfirmDialog>
       {state?.action === 'cancel' && (
         <CancelDialog appointment={state.appointment} open onOpenChange={(o) => !o && close()} />
       )}
@@ -155,7 +177,7 @@ export function availableActions(a: AppointmentItem) {
     [];
   if (a.actions.confirm) list.push({ action: 'confirm', label: 'Confirm', icon: CircleCheck });
   if (a.actions.complete)
-    list.push({ action: 'complete', label: 'Mark completed', icon: CheckCircle2 });
+    list.push({ action: 'complete', label: 'Complete session', icon: CheckCircle2 });
   if (a.actions.noShow) list.push({ action: 'noShow', label: 'Mark no-show', icon: UserX });
   if (a.actions.reschedule)
     list.push({ action: 'reschedule', label: 'Reschedule', icon: CalendarClock });

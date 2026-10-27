@@ -226,6 +226,13 @@ export function appointmentColumns({
           {row.original.lateCancellation && (
             <span className="text-xs text-muted-foreground">Late cancellation</span>
           )}
+          {/* The patient has arrived for an appointment that's still open. */}
+          {row.original.attendance.checkInTime &&
+            (row.original.status === 'SCHEDULED' || row.original.status === 'CONFIRMED') && (
+              <span className="text-xs font-medium text-success-foreground tabular">
+                Arrived {fmt.clock(row.original.attendance.checkInTime)}
+              </span>
+            )}
         </span>
       ),
     },

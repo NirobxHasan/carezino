@@ -3,7 +3,14 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { CalendarSearch, ClipboardCheck, ClipboardPlus, ExternalLink, Pencil } from 'lucide-react';
+import {
+  CalendarSearch,
+  ClipboardCheck,
+  ClipboardPlus,
+  ExternalLink,
+  NotebookPen,
+  Pencil,
+} from 'lucide-react';
 
 import { RequirePermission } from '@/components/auth/require-permission';
 import { EmptyState, ErrorState, PageSkeleton } from '@/components/feedback/states';
@@ -58,6 +65,12 @@ import {
 } from '../packages/package-display';
 import { PackagePicker } from '../packages/package-picker';
 import { relationshipLabel } from '../patients/patient-display';
+import {
+  ATTENDANCE_STATUSES,
+  AttendanceBadge,
+  CORRECTION_OUTCOMES,
+  sessionLinks,
+} from '../sessions/session-display';
 import { therapistLinks } from '../therapists/therapist-actions';
 import { availableActions, useAppointmentDialogs } from './appointment-actions';
 import {
@@ -105,7 +118,8 @@ function useInstant() {
   }, [activeCenter.timezone]);
 }
 
-function HistoryTimeline({ history }: { history: AppointmentHistoryEntry[] }) {
+/** What happened to an appointment, oldest first: bookings, moves, attendance, sessions. */
+export function HistoryTimeline({ history }: { history: AppointmentHistoryEntry[] }) {
   const fmt = useCenterFormat();
   const instant = useInstant();
   const when = (s: AppointmentSnapshot | null) =>
@@ -134,6 +148,26 @@ function HistoryTimeline({ history }: { history: AppointmentHistoryEntry[] }) {
           next?.series ? 'Cancelled with the rest of the series' : 'Cancelled',
           next?.cancellationReason && CANCELLATION_REASONS[next.cancellationReason],
           next?.lateCancellation && 'late cancellation',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+      case 'ATTENDANCE_RECORDED':
+      case 'ATTENDANCE_CORRECTED': {
+        const verb = h.action === 'ATTENDANCE_CORRECTED' ? 'Attendance corrected' : 'Attendance';
+        const status = next?.attendance ? ATTENDANCE_STATUSES[next.attendance].label : '';
+        const statusChanged = (next?.fields ?? []).includes('status');
+        const other = (next?.fields ?? []).filter((f) => f !== 'status').length;
+        return statusChanged || !other
+          ? `${verb}: ${status.toLowerCase()}`
+          : `${verb} details updated (${status.toLowerCase()})`;
+      }
+      case 'SESSION_STARTED':
+        return 'Session started';
+      case 'SESSION_CORRECTED':
+        return [
+          'Session voided',
+          next?.outcome && CORRECTION_OUTCOMES[next.outcome].label.toLowerCase(),
+          next?.packageReversed && 'package session given back',
         ]
           .filter(Boolean)
           .join(' · ');
@@ -348,6 +382,14 @@ export function AppointmentDetails({
       </Link>
     </Button>
   );
+  // Attendance, the session and its note are managed on the session page.
+  const sessionButton = can('sessions.read_own') && a.type === 'THERAPY_SESSION' && (
+    <Button size={sheet ? 'sm' : 'md'} variant={assessmentLink ? 'secondary' : 'primary'} asChild>
+      <Link href={sessionLinks.detail(a.id)}>
+        <NotebookPen /> Open session
+      </Link>
+    </Button>
+  );
 
   const actionBar = actions.length > 0 && (
     <div className="flex flex-wrap gap-2">
@@ -409,6 +451,18 @@ export function AppointmentDetails({
         )}
         {a.therapist.isYou && <span className="text-[13px] text-muted-foreground"> (you)</span>}
       </Detail>
+      {can('attendance.read') && (
+        <Detail label="Attendance">
+          <span className="flex flex-wrap items-center gap-2">
+            <AttendanceBadge status={a.attendance.status} />
+            {a.attendance.checkInTime && (
+              <span className="text-[13px] text-muted-foreground tabular">
+                Arrived {fmt.clock(a.attendance.checkInTime)}
+              </span>
+            )}
+          </span>
+        </Detail>
+      )}
       {contact && (
         <Detail label="Contact">
           {contact.type === 'SELF' ? 'Patient' : `${contact.name}, ${relationshipLabel(contact)}`}
@@ -522,6 +576,7 @@ export function AppointmentDetails({
             </Button>
           </div>
           {assessmentButton}
+          {sessionButton}
           {actionBar}
           {facts}
           <section className="grid gap-3">
@@ -549,6 +604,7 @@ export function AppointmentDetails({
           <>
             {editButton}
             {assessmentButton}
+            {sessionButton}
             {actionBar}
           </>
         }

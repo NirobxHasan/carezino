@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ClipboardList,
   ListChecks,
+  NotebookPen,
   Pencil,
   Ticket,
   Trash2,
@@ -38,6 +39,7 @@ import { AppointmentsPanel } from '../appointments/appointments-panel';
 import { PatientAssessmentsPanel } from '../assessments/patient-assessments';
 import { packageLinks } from '../packages/package-display';
 import { PatientPackagesPanel } from '../packages/patient-packages';
+import { PatientSessionsPanel } from '../sessions/patient-sessions';
 import { PatientPlansPanel } from '../therapy-plans/patient-plans';
 import { patientLinks, statusActions, usePatientDialogs } from './patient-actions';
 import { ConsentCard, ContactsCard } from './patient-contacts';
@@ -211,8 +213,14 @@ function RegisteredBanner({ patient }: { patient: PatientDetail }) {
   );
 }
 
-type Tab = 'overview' | 'appointments' | 'assessments' | 'plans' | 'packages';
-const TABS: Exclude<Tab, 'overview'>[] = ['appointments', 'assessments', 'plans', 'packages'];
+type Tab = 'overview' | 'appointments' | 'sessions' | 'assessments' | 'plans' | 'packages';
+const TABS: Exclude<Tab, 'overview'>[] = [
+  'appointments',
+  'sessions',
+  'assessments',
+  'plans',
+  'packages',
+];
 
 function PatientProfile() {
   const { id, patient, fallback } = usePatientPage();
@@ -222,6 +230,7 @@ function PatientProfile() {
   const searchParams = useSearchParams();
   const tabs = {
     appointments: can('appointments.read_own'),
+    sessions: can('sessions.read_own'),
     assessments: can('assessments.read_own'),
     plans: can('therapy_plans.read_own'),
     packages: can('package_enrollments.read'),
@@ -310,9 +319,8 @@ function PatientProfile() {
           </>
         }
       />
-      {/* Notes and billing get their own tabs here once those modules exist; until then
-          there's nothing real to show. */}
-      {tabs.appointments || tabs.assessments || tabs.plans || tabs.packages ? (
+      {/* Billing gets its own tab here once that module exists. */}
+      {Object.values(tabs).some(Boolean) ? (
         <Tabs
           value={tab}
           onValueChange={(next) => {
@@ -329,6 +337,11 @@ function PatientProfile() {
             {tabs.appointments && (
               <TabsTrigger value="appointments">
                 <CalendarDays /> Appointments
+              </TabsTrigger>
+            )}
+            {tabs.sessions && (
+              <TabsTrigger value="sessions">
+                <NotebookPen /> Sessions
               </TabsTrigger>
             )}
             {tabs.assessments && (
@@ -353,6 +366,9 @@ function PatientProfile() {
           <TabsContent value="appointments">
             {/* The header already offers booking for this patient. */}
             <AppointmentsPanel patientId={id} />
+          </TabsContent>
+          <TabsContent value="sessions">
+            <PatientSessionsPanel patientId={id} />
           </TabsContent>
           <TabsContent value="assessments">
             <PatientAssessmentsPanel patientId={id} />

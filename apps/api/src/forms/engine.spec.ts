@@ -6,7 +6,7 @@ import {
   validateAnswers,
   type TemplateDefinition,
 } from './engine';
-import { STARTER_DEFINITION } from './starter';
+import { STARTER_DEFINITION } from '../assessments/starter';
 
 function form(fields: object[], extra: object = {}) {
   return { sections: [{ key: 'main', title: 'Main', fields, ...extra }] };

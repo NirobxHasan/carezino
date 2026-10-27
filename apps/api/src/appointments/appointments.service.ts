@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 
 import type { TenantContext } from '../auth/auth-context';
 import { LIMITS } from '../center-settings/limits';
@@ -15,6 +15,7 @@ import type { Prisma } from '../generated/prisma/client';
 import {
   AppointmentHistoryAction,
   AppointmentStatus,
+  AttendanceStatus,
   PackageLedgerMovement,
   PackageReleaseReason,
   PackageReservationStatus,
@@ -27,6 +28,7 @@ import {
 import { assertCan } from '../patients/access';
 import { primaryContactOf } from '../patients/contacts';
 import { PrismaService } from '../prisma/prisma.service';
+import { attendanceOf, attended } from '../sessions/rules';
 import { lockTherapist } from '../therapists/access';
 import { centerHoursByDay } from '../therapists/availability.service';
 import { DAY_MINUTES } from '../therapists/schedule';
@@ -59,6 +61,7 @@ import {
   localPeriod,
   needsStarted,
 } from './rules';
+import { SESSION_OUTCOMES, type SessionOutcomes } from './sessions.port';
 
 type Tx = Prisma.TransactionClient;
 
@@ -98,6 +101,7 @@ export const itemSelect = {
     },
   },
   therapyType: { select: { id: true, name: true, code: true, color: true } },
+  attendance: { select: { status: true, checkInAt: true } },
 } satisfies Prisma.AppointmentSelect;
 
 const userSelect = { select: { id: true, fullName: true } } as const;
@@ -210,10 +214,18 @@ function allowedActions(row: ItemRow, view: View) {
     open &&
     isLateCancellation(row.startAt, view.now, view.cancellationCutoffMinutes);
   const manage = open && can('appointments.manage_status');
+  // Completing needs attendance (marked, or given when completing); a no-show is the
+  // patient being absent, so it isn't offered once they've arrived.
+  const attendance = attendanceOf(row.status, row.attendance?.status);
   return {
     confirm: manage && row.status === AppointmentStatus.SCHEDULED,
-    complete: manage && started,
-    noShow: manage && started,
+    complete:
+      manage &&
+      started &&
+      can('sessions.complete') &&
+      (attended(attendance) || can('attendance.record')),
+    noShow:
+      manage && started && !attended(attendance) && can('attendance.record'),
     reschedule: open && can('appointments.reschedule'),
     cancel:
       open &&
@@ -259,6 +271,16 @@ export function toItem(row: ItemRow, view: View) {
         therapist.membershipId === view.tenant.membershipId,
     },
     therapyType: row.therapyType,
+    /** Whether the patient came; ABSENT for no-shows (see the sessions module) */
+    attendance: {
+      status: attendanceOf(row.status, row.attendance?.status),
+      checkInAt: row.attendance?.checkInAt ?? null,
+      checkInTime: row.attendance?.checkInAt
+        ? formatClock(
+            instantToZoned(row.attendance.checkInAt, view.timeZone).minutes,
+          )
+        : null,
+    },
     /** Booked over a clash on purpose (the center allows double booking) */
     allowOverlap: row.allowOverlap,
     lateCancellation: row.lateCancellation,
@@ -360,6 +382,43 @@ export async function lockPatient(tx: Tx, patientId: string) {
   await tx.$queryRaw`SELECT id FROM "Patient" WHERE id = ${patientId}::uuid FOR UPDATE`;
 }
 
+/**
+ * Appointments whose patient (name, ID, mobile or a guardian's mobile) or therapist
+ * (name) matches. "+880 1712-…" finds 01712…, which is how BD mobiles are stored.
+ */
+export function appointmentSearch(
+  search: string,
+): Prisma.AppointmentWhereInput {
+  const digits = search.replace(/[\s\-().]/g, '').replace(/^\+?88(?=01)/, '');
+  const phoneLike = /^\+?\d{3,}$/.test(digits);
+  return {
+    OR: [
+      { patient: { fullName: { contains: search, mode: 'insensitive' } } },
+      { patient: { code: { contains: search, mode: 'insensitive' } } },
+      { therapist: { fullName: { contains: search, mode: 'insensitive' } } },
+      ...(phoneLike
+        ? [
+            { patient: { mobile: { contains: digits } } },
+            {
+              patient: {
+                guardians: {
+                  some: {
+                    guardian: {
+                      OR: [
+                        { mobile: { contains: digits } },
+                        { secondaryMobile: { contains: digits } },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
 /** Records one entry of an appointment's history in the same transaction as the change. */
 export function recordHistory(
   tx: Tx,
@@ -397,6 +456,7 @@ export class AppointmentsService {
     private readonly prisma: PrismaService,
     private readonly booking: BookingService,
     private readonly packages: PackageSessions,
+    @Inject(SESSION_OUTCOMES) private readonly sessions: SessionOutcomes,
   ) {}
 
   async view(tenant: TenantContext, policy?: Policy): Promise<View> {
@@ -455,12 +515,6 @@ export class AppointmentsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const view = await this.view(tenant);
-    const search = query.search;
-    // "+880 1712-…" should find 01712…, which is how BD mobiles are stored.
-    const digits = search
-      ?.replace(/[\s\-().]/g, '')
-      .replace(/^\+?88(?=01)/, '');
-    const phoneLike = digits !== undefined && /^\+?\d{3,}$/.test(digits);
     const startAt = this.dateRange(query.from, query.to, view.timeZone);
     const where: Prisma.AppointmentWhereInput = {
       AND: [
@@ -469,44 +523,7 @@ export class AppointmentsService {
         Object.keys(startAt).length ? { startAt } : {},
         query.timeframe === 'upcoming' ? { startAt: { gte: view.now } } : {},
         query.timeframe === 'past' ? { startAt: { lt: view.now } } : {},
-        search
-          ? {
-              OR: [
-                {
-                  patient: {
-                    fullName: { contains: search, mode: 'insensitive' },
-                  },
-                },
-                {
-                  patient: { code: { contains: search, mode: 'insensitive' } },
-                },
-                {
-                  therapist: {
-                    fullName: { contains: search, mode: 'insensitive' },
-                  },
-                },
-                ...(phoneLike
-                  ? [
-                      { patient: { mobile: { contains: digits } } },
-                      {
-                        patient: {
-                          guardians: {
-                            some: {
-                              guardian: {
-                                OR: [
-                                  { mobile: { contains: digits } },
-                                  { secondaryMobile: { contains: digits } },
-                                ],
-                              },
-                            },
-                          },
-                        },
-                      },
-                    ]
-                  : []),
-              ],
-            }
-          : {},
+        query.search ? appointmentSearch(query.search) : {},
       ],
     };
     const order =
@@ -977,6 +994,7 @@ export class AppointmentsService {
         packageEnrollmentId: true,
         therapist: { select: { id: true, fullName: true } },
         therapyType: { select: { id: true, name: true } },
+        attendance: { select: { status: true } },
       },
     });
     if (!row) throw appointmentNotFound();
@@ -1061,6 +1079,20 @@ export class AppointmentsService {
       sameType ? current.durationMinutes : undefined,
     );
     const endAt = new Date(startAt.getTime() + durationMinutes * 60_000);
+    // Attendance belongs to the day the patient came; moving that to another day would
+    // leave it describing a visit that didn't happen then.
+    if (
+      current.attendance &&
+      attended(current.attendance.status) &&
+      localTimes(startAt, endAt, policy.timeZone).date !==
+        localTimes(current.startAt, current.endAt, policy.timeZone).date
+    ) {
+      throw apiError(
+        HttpStatus.CONFLICT,
+        'The patient has already arrived for this appointment, so it can only move within the same day. Correct the attendance first if that was a mistake.',
+        'ATTENDANCE_RECORDED',
+      );
+    }
     if (
       startAt.getTime() === current.startAt.getTime() &&
       durationMinutes === current.durationMinutes &&
@@ -1224,8 +1256,10 @@ export class AppointmentsService {
 
   /**
    * Confirm, complete or mark a no-show, following the allowed transitions (rules.ts).
-   * Completing uses the held package session; a no-show uses it only if the package
-   * charges no-shows, and gives it back otherwise.
+   * Completing and no-shows belong to the session lifecycle (sessions.port.ts):
+   * completing needs the patient present or late (given here when not marked) and uses
+   * the held package session; a no-show marks them absent and uses the session only if
+   * the package charges no-shows, giving it back otherwise.
    */
   async setStatus(
     tenant: TenantContext,
@@ -1248,17 +1282,29 @@ export class AppointmentsService {
         'APPOINTMENT_NOT_STARTED',
       );
     }
+    if (dto.status === AppointmentStatus.COMPLETED) {
+      assertCan(tenant, 'sessions.complete');
+      await this.sessions.complete(tenant, id, { attendance: dto.attendance });
+      return this.get(tenant, id);
+    }
+    if (dto.status === AppointmentStatus.NO_SHOW) {
+      assertCan(tenant, 'attendance.record');
+      if (current.attendance && attended(current.attendance.status)) {
+        throw apiError(
+          HttpStatus.CONFLICT,
+          `The patient was marked ${current.attendance.status === AttendanceStatus.LATE ? 'late' : 'present'}. Change their attendance to absent if they didn’t come.`,
+          'ATTENDANCE_RECORDED',
+        );
+      }
+      await this.sessions.markAbsent(tenant, id);
+      return this.get(tenant, id);
+    }
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.appointment.updateMany({
         where: { id, centerId: tenant.centerId, status: current.status },
         data: { status: dto.status, updatedById: tenant.userId },
       });
       if (!count) throw changedMeanwhile();
-      if (dto.status === AppointmentStatus.COMPLETED) {
-        await this.packages.settle(tx, tenant, id, 'COMPLETED');
-      } else if (dto.status === AppointmentStatus.NO_SHOW) {
-        await this.packages.settle(tx, tenant, id, 'NO_SHOW');
-      }
       await recordHistory(tx, tenant, {
         appointmentId: id,
         action: AppointmentHistoryAction.STATUS_CHANGED,

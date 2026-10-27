@@ -147,8 +147,12 @@ export const appointmentsApi = {
       method: 'PATCH',
       body: { packageEnrollmentId },
     }),
-  setStatus: (id: string, status: StatusChange) =>
-    request<AppointmentDetail>(`${path(id)}/status`, { method: 'PATCH', body: { status } }),
+  /** Completing records attendance first when given (it must be marked to complete). */
+  setStatus: (id: string, status: StatusChange, attendance?: 'PRESENT' | 'LATE') =>
+    request<AppointmentDetail>(`${path(id)}/status`, {
+      method: 'PATCH',
+      body: attendance ? { status, attendance } : { status },
+    }),
   previewSeries: (input: SeriesInput) =>
     request<SeriesPreview>('/appointment-series/preview', { method: 'POST', body: input }),
   createSeries: (input: SeriesInput & { skipConflicts?: boolean }) =>
@@ -234,6 +238,8 @@ function useAppointmentMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TRe
       void qc.invalidateQueries({ queryKey: ['therapists'] });
       // Booking, moving, cancelling and completing hold, free or use package sessions.
       void qc.invalidateQueries({ queryKey: ['package-enrollments'] });
+      // Completing and no-shows are session and attendance changes too.
+      void qc.invalidateQueries({ queryKey: ['sessions'] });
     },
   });
 }
@@ -268,8 +274,9 @@ export function useCancelAppointment() {
 }
 
 export function useSetAppointmentStatus() {
-  return useAppointmentMutation((v: { id: string; status: StatusChange }) =>
-    appointmentsApi.setStatus(v.id, v.status),
+  return useAppointmentMutation(
+    (v: { id: string; status: StatusChange; attendance?: 'PRESENT' | 'LATE' }) =>
+      appointmentsApi.setStatus(v.id, v.status, v.attendance),
   );
 }
 

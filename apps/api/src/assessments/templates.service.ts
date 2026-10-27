@@ -9,6 +9,12 @@ import {
   AssessmentTemplateStatus,
   TemplateVersionStatus,
 } from '../generated/prisma/enums';
+import {
+  fieldCount,
+  parseDefinition,
+  storedDefinition,
+  typeChanges,
+} from '../forms/engine';
 import { fieldError } from '../patients/contacts';
 import { PrismaService } from '../prisma/prisma.service';
 import { templateNotFound } from './access';
@@ -18,12 +24,6 @@ import {
   type ListTemplatesQuery,
   type UpdateTemplateDto,
 } from './dto';
-import {
-  fieldCount,
-  parseDefinition,
-  typeChanges,
-  type TemplateDefinition,
-} from './engine';
 import { STARTER_DEFINITION } from './starter';
 
 type Tx = Prisma.TransactionClient;
@@ -63,11 +63,6 @@ const templateSelect = {
 type TemplateRow = Prisma.AssessmentTemplateGetPayload<{
   select: typeof templateSelect;
 }>;
-
-/** Stored definitions were checked when saved; this only narrows the type. */
-export function storedDefinition(value: Prisma.JsonValue): TemplateDefinition {
-  return value as unknown as TemplateDefinition;
-}
 
 const archived = () =>
   apiError(

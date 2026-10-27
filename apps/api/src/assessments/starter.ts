@@ -1,4 +1,4 @@
-import type { TemplateDefinition } from './engine';
+import type { TemplateDefinition } from '../forms/engine';
 
 /**
  * An optional starting point for a center's own templates, deliberately general so it

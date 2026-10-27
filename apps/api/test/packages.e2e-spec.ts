@@ -674,6 +674,7 @@ describe('Packages and enrollments (e2e)', () => {
       const done = await ok<Appointment>(
         s.admin.patch(`/appointments/${past.id}/status`, {
           status: 'COMPLETED',
+          attendance: 'PRESENT',
         }),
       );
       expect(done.package).toMatchObject({
@@ -980,7 +981,10 @@ describe('Packages and enrollments (e2e)', () => {
       // Still pending while only held.
       expect((await enrollment(s, e.id)).status).toBe('PENDING');
       await ok(
-        s.admin.patch(`/appointments/${a.id}/status`, { status: 'COMPLETED' }),
+        s.admin.patch(`/appointments/${a.id}/status`, {
+          status: 'COMPLETED',
+          attendance: 'PRESENT',
+        }),
       );
       const active = await enrollment(s, e.id);
       const start = new Date(`${day}T00:00:00Z`);
@@ -1019,7 +1023,10 @@ describe('Packages and enrollments (e2e)', () => {
         201,
       );
       const done = await ok<Appointment>(
-        s.admin.patch(`/appointments/${a.id}/status`, { status: 'COMPLETED' }),
+        s.admin.patch(`/appointments/${a.id}/status`, {
+          status: 'COMPLETED',
+          attendance: 'PRESENT',
+        }),
       );
       const consumptionId = done.package!.consumptionId!;
       const reversal = {
@@ -1172,6 +1179,7 @@ describe('Packages and enrollments (e2e)', () => {
       await ok(
         s.admin.patch(`/appointments/${past.id}/status`, {
           status: 'COMPLETED',
+          attendance: 'PRESENT',
         }),
       );
       const upcoming = await ok<Appointment>(
@@ -1252,7 +1260,10 @@ describe('Packages and enrollments (e2e)', () => {
         201,
       );
       await ok(
-        s.admin.patch(`/appointments/${a.id}/status`, { status: 'COMPLETED' }),
+        s.admin.patch(`/appointments/${a.id}/status`, {
+          status: 'COMPLETED',
+          attendance: 'PRESENT',
+        }),
       );
       const ids = async (q: string) =>
         (

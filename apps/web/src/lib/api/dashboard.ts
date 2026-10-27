@@ -136,7 +136,7 @@ export async function getDashboard(params: { therapistId?: ID }): Promise<Dashbo
       tone: 'warning',
       title: `${pendingNotes} session note${pendingNotes === 1 ? '' : 's'} pending`,
       description: 'Completed sessions from the last 14 days without a submitted note.',
-      href: '/clinical?tab=notes',
+      href: '/sessions?note=PENDING',
     });
   }
   if (!params.therapistId) {

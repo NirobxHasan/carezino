@@ -1,11 +1,12 @@
 import { parseIsoDate } from '../common/time';
 
 /**
- * The assessment form engine: the one schema template definitions and answers are
- * checked against. Definitions are plain data (labels, types, options and limits),
- * never code: nothing here evaluates expressions, HTML or scripts, and unknown
- * properties are rejected rather than stored. Pure functions, so the rules can be
- * tested without a database.
+ * The dynamic form engine: the one schema template definitions and answers are checked
+ * against, shared by assessment templates and session note templates (each keeps its
+ * own versioned template tables). Definitions are plain data (labels, types, options
+ * and limits), never code: nothing here evaluates expressions, HTML or scripts, and
+ * unknown properties are rejected rather than stored. Pure functions, so the rules can
+ * be tested without a database.
  *
  * Errors are maps of field paths to messages, like the API's validation errors, e.g.
  * { 'definition.sections.0.fields.2.options': 'Add at least 2 options' } or
@@ -586,6 +587,11 @@ export function typeChanges(
 
 export function allFields(definition: TemplateDefinition) {
   return definition.sections.flatMap((s) => s.fields);
+}
+
+/** Stored definitions were checked when saved; this only narrows the type. */
+export function storedDefinition(value: unknown): TemplateDefinition {
+  return value as TemplateDefinition;
 }
 
 /** Values that mean "not answered": never stored, so unanswered stays distinguishable. */

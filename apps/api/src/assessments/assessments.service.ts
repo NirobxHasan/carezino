@@ -18,6 +18,15 @@ import {
   type AssessmentType,
   type GoalPriority,
 } from '../generated/prisma/enums';
+import {
+  changedAnswerLabels,
+  defaultAnswers,
+  storedDefinition,
+  validateAnswers,
+  type Answers,
+  type Errors,
+  type TemplateDefinition,
+} from '../forms/engine';
 import { assertCan } from '../patients/access';
 import { patientAge } from '../patients/age';
 import { fieldError } from '../patients/contacts';
@@ -39,15 +48,6 @@ import type {
   PatientOptionsQuery,
   UpdateAssessmentDto,
 } from './dto';
-import {
-  changedAnswerLabels,
-  defaultAnswers,
-  validateAnswers,
-  type Answers,
-  type Errors,
-  type TemplateDefinition,
-} from './engine';
-import { storedDefinition } from './templates.service';
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | PrismaService;

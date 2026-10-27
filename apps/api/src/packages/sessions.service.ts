@@ -402,4 +402,47 @@ export class PackageSessions {
       });
     }
   }
+
+  /**
+   * Gives back the session an appointment was charged, when the appointment turns out
+   * not to have happened (a session completed by mistake). Appends one reversal pointing
+   * at the consumption, which stays in the ledger. Returns the enrollment's ID, or null
+   * when nothing was charged. Idempotent: a consumption that's already reversed is left
+   * alone, and the database refuses a second reversal of the same consumption. The
+   * appointment can't be charged again afterwards (one consumption per appointment).
+   */
+  async reverse(
+    tx: Tx,
+    tenant: TenantContext,
+    appointmentId: string,
+    reason: string,
+  ) {
+    const charged = await tx.packageSessionLedger.findFirst({
+      where: {
+        appointmentId,
+        centerId: tenant.centerId,
+        movement: PackageLedgerMovement.SESSION_CONSUMPTION,
+      },
+      select: { id: true, enrollmentId: true },
+    });
+    if (!charged) return null;
+    await lockEnrollment(tx, tenant, charged.enrollmentId);
+    const reversed = await tx.packageSessionLedger.findFirst({
+      where: { reversesId: charged.id },
+      select: { id: true },
+    });
+    if (reversed) return null;
+    await tx.packageSessionLedger.create({
+      data: {
+        centerId: tenant.centerId,
+        enrollmentId: charged.enrollmentId,
+        movement: PackageLedgerMovement.CONSUMPTION_REVERSAL,
+        quantity: 1,
+        reversesId: charged.id,
+        reason,
+        createdById: tenant.userId,
+      },
+    });
+    return charged.enrollmentId;
+  }
 }

@@ -16,6 +16,11 @@ const TABS: { href: string; label: string; permission: Permission }[] = [
     permission: 'assessment_templates.read',
   },
   {
+    href: '/settings/session-note-templates',
+    label: 'Session note templates',
+    permission: 'session_note_templates.read',
+  },
+  {
     href: '/settings/goal-categories',
     label: 'Goal categories',
     permission: 'therapy_plans.read_own',

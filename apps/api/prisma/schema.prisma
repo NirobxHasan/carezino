@@ -69,6 +69,12 @@ model Center {
   packageEnrollments   PackageEnrollment[]
   packageLedger        PackageSessionLedger[]
   packageReservations  PackageSessionReservation[]
+  attendance           SessionAttendance[]
+  therapySessions      TherapySession[]
+  noteTemplates        SessionNoteTemplate[]
+  noteTemplateVersions SessionNoteTemplateVersion[]
+  sessionNotes         SessionNote[]
+  noteAmendments       SessionNoteAmendment[]
 }
 
 /// Per-center counters for human-readable numbers such as patient codes. A number is
@@ -146,6 +152,17 @@ model User {
   packageMovements          PackageSessionLedger[]       @relation("LedgerCreatedBy")
   reservationsMade          PackageSessionReservation[]  @relation("ReservationCreatedBy")
   reservationsReleased      PackageSessionReservation[]  @relation("ReservationReleasedBy")
+  attendanceRecorded        SessionAttendance[]          @relation("AttendanceRecordedBy")
+  sessionsStarted           TherapySession[]             @relation("SessionStartedBy")
+  sessionsCompleted         TherapySession[]             @relation("SessionCompletedBy")
+  sessionsVoided            TherapySession[]             @relation("SessionVoidedBy")
+  noteTemplatesCreated      SessionNoteTemplate[]        @relation("NoteTemplateCreatedBy")
+  noteVersionsCreated       SessionNoteTemplateVersion[] @relation("NoteTemplateVersionCreatedBy")
+  noteVersionsPublished     SessionNoteTemplateVersion[] @relation("NoteTemplateVersionPublishedBy")
+  sessionNotesCreated       SessionNote[]                @relation("SessionNoteCreatedBy")
+  sessionNotesUpdated       SessionNote[]                @relation("SessionNoteUpdatedBy")
+  sessionNotesCompleted     SessionNote[]                @relation("SessionNoteCompletedBy")
+  sessionNoteAmendments     SessionNoteAmendment[]       @relation("SessionNoteAmendedBy")
 }
 
 // ── Access ──────────────────────────────────────────────────────────────────
@@ -296,6 +313,7 @@ model TherapyType {
   therapyPlans        TherapyPlan[]
   packages            PackageEligibleTherapyType[]
   enrollments         PackageEnrollmentTherapyType[]
+  noteTemplates       SessionNoteTemplate[]
 
   @@unique([centerId, code])
   @@unique([centerId, name])
@@ -499,6 +517,7 @@ model Therapist {
   assessments     Assessment[]
   therapyPlans    TherapyPlan[]
   planReviews     TherapyPlanReview[]
+  sessionNotes    SessionNote[]
 
   @@unique([centerId, code])
   @@index([centerId, deletedAt, status])
@@ -817,6 +836,13 @@ enum AppointmentHistoryAction {
   RESCHEDULED
   STATUS_CHANGED
   CANCELLED
+  /// Attendance recorded or changed while the appointment was open
+  ATTENDANCE_RECORDED
+  /// Attendance changed after the appointment closed, with a reason
+  ATTENDANCE_CORRECTED
+  SESSION_STARTED
+  /// A completed session voided, with a reason; its package charge reversed
+  SESSION_CORRECTED
 }
 
 /// How a recurring booking was asked for. Its occurrences are ordinary Appointment rows
@@ -906,6 +932,10 @@ model Appointment {
   history             AppointmentHistory[]
   /// The assessment recorded for this booking, if any (at most one)
   assessment          Assessment?
+  /// Whether the patient came, once recorded
+  attendance          SessionAttendance?
+  /// Therapy sessions only: the session's lifecycle and, through it, its note
+  session             TherapySession?
 
   @@index([centerId, startAt])
   @@index([centerId, status, startAt])
@@ -1328,6 +1358,8 @@ model TherapyPlan {
   progress         TherapyGoalProgress[]
   reviews          TherapyPlanReview[]
   revisions        TherapyPlanRevision[]
+  sessions         TherapySession[]
+  sessionNotes     SessionNote[]
 
   // At most one ACTIVE or PAUSED plan per patient and therapy type: a partial unique
   // index in the migration.
@@ -1398,18 +1430,24 @@ model TherapyGoalProgress {
   observation      String?
   correctsId       String?            @unique @db.Uuid
   correctionReason String?
+  /// The session note it was recorded in, if any. Corrections keep the original's, so
+  /// a note's current progress is its entries that haven't been corrected. At most one
+  /// uncorrected-chain start per note and goal (partial unique index in the migration).
+  sessionNoteId    String?            @db.Uuid
   recordedById     String             @db.Uuid
   createdAt        DateTime           @default(now())
 
   center      Center               @relation(fields: [centerId], references: [id], onDelete: Restrict)
   therapyPlan TherapyPlan          @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
   goal        TherapyPlanGoal      @relation(fields: [goalId], references: [id], onDelete: Restrict)
+  sessionNote SessionNote?         @relation(fields: [sessionNoteId], references: [id], onDelete: Restrict)
   corrects    TherapyGoalProgress? @relation("ProgressCorrection", fields: [correctsId], references: [id], onDelete: Restrict)
   correctedBy TherapyGoalProgress? @relation("ProgressCorrection")
   recordedBy  User                 @relation("ProgressRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
 
   @@index([goalId, observationDate])
   @@index([therapyPlanId, observationDate])
+  @@index([sessionNoteId])
 }
 
 /// A periodic clinical review, confirmed when it's saved. Corrections keep the earlier
@@ -1813,4 +1851,225 @@ model PackageSessionReservation {
 
   @@index([enrollmentId, status, sessionDate])
   @@index([appointmentId])
+}
+
+// ── Sessions: attendance, session records and session notes ─────────────────
+// Four separate records describe what happened to a booked appointment, and none of
+// them is the booking itself:
+// - SessionAttendance: whether the patient came (front desk). ABSENT is the attendance
+//   side of the appointment's NO_SHOW status: recording one sets the other.
+// - TherapySession: the session's own lifecycle (started, completed, voided) for
+//   therapy-session appointments. Completing it is how an appointment is completed, and
+//   charges its held package session through PackageSessions, in one transaction.
+// - SessionNote: the clinical documentation, from a center-defined, versioned template
+//   (the same form engine as assessments, src/forms/engine.ts). Its goal progress is
+//   written to TherapyGoalProgress when the note is completed, never stored twice.
+// - AppointmentHistory: every attendance and session change, with who and why.
+//
+// All three are keyed by the appointment (appointmentId is their primary key or a
+// unique column), so an appointment has at most one of each.
+
+enum AttendanceStatus {
+  NOT_MARKED
+  PRESENT
+  /// Absent: the appointment is a no-show
+  ABSENT
+  /// Arrived late, but attended
+  LATE
+}
+
+/// NOT_STARTED is never stored: an appointment without a session row hasn't started.
+/// VOIDED: completed by mistake and corrected; the package charge was reversed. Final.
+enum TherapySessionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  VOIDED
+}
+
+/// DRAFT: editable by its therapist. COMPLETED: signed off. AMENDED: corrected since.
+enum SessionNoteStatus {
+  DRAFT
+  COMPLETED
+  AMENDED
+}
+
+/// DRAFT: never published. PUBLISHED: usable. ARCHIVED: kept for history only.
+enum SessionNoteTemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Whether the patient came, recorded against one appointment.
+model SessionAttendance {
+  appointmentId String           @id @db.Uuid
+  centerId      String           @db.Uuid
+  status        AttendanceStatus
+  /// When the patient arrived (Check in sets it to the moment it's pressed)
+  checkInAt     DateTime?
+  /// Optional actual session times; [actualStartAt, actualEndAt)
+  actualStartAt DateTime?
+  actualEndAt   DateTime?
+  note          String?
+  recordedById  String           @db.Uuid
+  recordedAt    DateTime
+  /// Bumped on every change; writes may send the revision they started from
+  revision      Int              @default(1)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  center      Center      @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  recordedBy  User        @relation("AttendanceRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([centerId, status])
+}
+
+/// The session of one therapy-session appointment. Never deleted.
+model TherapySession {
+  appointmentId String               @id @db.Uuid
+  centerId      String               @db.Uuid
+  status        TherapySessionStatus
+  /// The patient's open plan for this therapy when the session started, if any
+  therapyPlanId String?              @db.Uuid
+  startedAt     DateTime?
+  startedById   String?              @db.Uuid
+  completedAt   DateTime?
+  completedById String?              @db.Uuid
+  voidedAt      DateTime?
+  voidedById    String?              @db.Uuid
+  voidReason    String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  center      Center       @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  appointment Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  therapyPlan TherapyPlan? @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  startedBy   User?        @relation("SessionStartedBy", fields: [startedById], references: [id], onDelete: Restrict)
+  completedBy User?        @relation("SessionCompletedBy", fields: [completedById], references: [id], onDelete: Restrict)
+  voidedBy    User?        @relation("SessionVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  note        SessionNote?
+
+  @@index([centerId, status])
+  @@index([therapyPlanId])
+}
+
+model SessionNoteTemplate {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  centerId           String                    @db.Uuid
+  /// Null: a general template, usable for every therapy type
+  therapyTypeId      String?                   @db.Uuid
+  name               String
+  description        String?
+  status             SessionNoteTemplateStatus @default(DRAFT)
+  /// Preselected for new notes of its therapy type (or, for a general template, of any
+  /// type without a default of its own). At most one per center and therapy type, by an
+  /// index in the migration; only published templates can be the default.
+  isDefault          Boolean                   @default(false)
+  latestVersion      Int                       @default(1)
+  publishedVersionId String?                   @unique @db.Uuid
+  createdById        String                    @db.Uuid
+  archivedAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  center           Center                       @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyType      TherapyType?                 @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  createdBy        User                         @relation("NoteTemplateCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedVersion SessionNoteTemplateVersion?  @relation("PublishedNoteVersion", fields: [publishedVersionId], references: [id], onDelete: Restrict)
+  versions         SessionNoteTemplateVersion[] @relation("NoteTemplateVersions")
+
+  @@unique([centerId, name])
+  @@index([centerId, therapyTypeId, status])
+}
+
+/// One version of a note template's form; frozen once published (migration trigger).
+model SessionNoteTemplateVersion {
+  id            String                @id @default(uuid()) @db.Uuid
+  centerId      String                @db.Uuid
+  templateId    String                @db.Uuid
+  version       Int
+  status        TemplateVersionStatus @default(DRAFT)
+  /// { sections: [...] }, see src/forms/engine.ts
+  definition    Json
+  createdById   String                @db.Uuid
+  publishedById String?               @db.Uuid
+  publishedAt   DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  center      Center               @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  template    SessionNoteTemplate  @relation("NoteTemplateVersions", fields: [templateId], references: [id], onDelete: Restrict)
+  createdBy   User                 @relation("NoteTemplateVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publishedBy User?                @relation("NoteTemplateVersionPublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
+  publishedOf SessionNoteTemplate? @relation("PublishedNoteVersion")
+  notes       SessionNote[]
+
+  @@unique([templateId, version])
+}
+
+/// The clinical note of one session, written and signed by the session's therapist.
+/// Completed notes are never deleted or edited in place: amendments keep each earlier
+/// version in SessionNoteAmendment.
+model SessionNote {
+  id                String            @id @default(uuid()) @db.Uuid
+  centerId          String            @db.Uuid
+  appointmentId     String            @unique @db.Uuid
+  /// The exact form used; never changes
+  templateVersionId String            @db.Uuid
+  /// The responsible therapist: the session's therapist when the note was started
+  therapistId       String            @db.Uuid
+  /// The plan whose goals the note records progress for, if any
+  therapyPlanId     String?           @db.Uuid
+  status            SessionNoteStatus @default(DRAFT)
+  /// Field key → answer, validated against the template version; empty answers absent
+  answers           Json              @default("{}")
+  /// Goal progress while DRAFT: [{ goalId, observation?, measuredValue?, goalStatus? }].
+  /// Completing the note writes these to TherapyGoalProgress (sessionNoteId) and empties
+  /// this, so progress is only ever stored once.
+  draftGoals        Json              @default("[]")
+  revision          Int               @default(1)
+  createdById       String            @db.Uuid
+  updatedById       String?           @db.Uuid
+  completedById     String?           @db.Uuid
+  completedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  center          Center                     @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  session         TherapySession             @relation(fields: [appointmentId], references: [appointmentId], onDelete: Restrict)
+  templateVersion SessionNoteTemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  therapist       Therapist                  @relation(fields: [therapistId], references: [id], onDelete: Restrict)
+  therapyPlan     TherapyPlan?               @relation(fields: [therapyPlanId], references: [id], onDelete: Restrict)
+  createdBy       User                       @relation("SessionNoteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy       User?                      @relation("SessionNoteUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  completedBy     User?                      @relation("SessionNoteCompletedBy", fields: [completedById], references: [id], onDelete: Restrict)
+  amendments      SessionNoteAmendment[]
+  progress        TherapyGoalProgress[]
+
+  @@index([centerId, status, updatedAt])
+  @@index([therapistId, status])
+}
+
+/// One correction of a completed note, append-only. previousContent is the note before
+/// this correction ({ answers, goals }), so the first row holds the signed original.
+model SessionNoteAmendment {
+  id               String   @id @default(uuid()) @db.Uuid
+  centerId         String   @db.Uuid
+  noteId           String   @db.Uuid
+  number           Int
+  reason           String
+  /// Labels of what changed (field labels, goal titles), never values
+  changedFields    Json
+  previousContent  Json
+  previousRevision Int
+  amendedById      String   @db.Uuid
+  amendedAt        DateTime @default(now())
+
+  center    Center      @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  note      SessionNote @relation(fields: [noteId], references: [id], onDelete: Restrict)
+  amendedBy User        @relation("SessionNoteAmendedBy", fields: [amendedById], references: [id], onDelete: Restrict)
+
+  @@unique([noteId, number])
 }

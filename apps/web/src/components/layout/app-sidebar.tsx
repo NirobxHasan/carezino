@@ -8,7 +8,7 @@ import { Logo } from '@/components/brand/logo';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
-import { isActive, navGroups, settingsNav, type NavItem } from './nav';
+import { activeHref, isActive, navGroups, settingsNav, type NavItem } from './nav';
 
 function NavLink({
   item,
@@ -66,6 +66,10 @@ export function SidebarNav({
   const groups = navGroups
     .map((g) => ({ ...g, items: g.items.filter((i) => can(i.permission)) }))
     .filter((g) => g.items.length);
+  const current = activeHref(
+    pathname,
+    groups.flatMap((g) => g.items.map((i) => i.href)),
+  );
 
   return (
     <nav aria-label="Main" className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
@@ -85,7 +89,7 @@ export function SidebarNav({
             <NavLink
               key={item.href}
               item={item}
-              active={isActive(pathname, item.href)}
+              active={item.href === current}
               collapsed={collapsed}
               onNavigate={onNavigate}
             />

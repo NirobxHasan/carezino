@@ -150,6 +150,40 @@ export const PERMISSIONS = [
   'package_enrollments.cancel',
   /** Bonus and correcting credits, debits, and reversing a charged session, with a reason */
   'package_enrollments.adjust',
+  /** Whether patients came, for every appointment the caller can see */
+  'attendance.read',
+  /** Checking patients in and marking them present, late or absent (absent is a no-show) */
+  'attendance.record',
+  /** Changing attendance after the appointment has closed, with a reason */
+  'attendance.correct',
+  /**
+   * Every session of the center (attendance, session and note status, package usage),
+   * without clinical content: for the front desk's day and managers' oversight
+   */
+  'sessions.read',
+  /** Only sessions with the therapist profile linked to the caller's staff account. Route minimum. */
+  'sessions.read_own',
+  /** Starting and completing sessions (completing charges the held package session) */
+  'sessions.complete',
+  /** Voiding a session completed by mistake, with a reason; its package charge is reversed */
+  'sessions.correct',
+  /** Every session note's clinical content. Never editing. */
+  'session_notes.read',
+  /**
+   * Clinical content of the caller's own notes (drafts included) and completed notes of
+   * patients in their care. The writes below only ever apply to the caller's own notes.
+   */
+  'session_notes.read_own',
+  'session_notes.create',
+  'session_notes.update_draft',
+  /** Signing a note off as completed, which also records its goal progress */
+  'session_notes.complete',
+  /** Correcting a completed note, with a reason; the earlier content is kept */
+  'session_notes.amend',
+  /** Session note templates and their published forms, e.g. to choose one */
+  'session_note_templates.read',
+  /** Creating, editing, publishing, archiving and choosing default note templates */
+  'session_note_templates.manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -254,6 +288,32 @@ const ASSESSMENT_STATUS: Permission[] = [
   'assessments.read_own',
 ];
 
+/**
+ * The front desk's day: checking patients in, marking attendance and completing
+ * sessions, for every appointment of the center. Note status is visible, note content
+ * never is.
+ */
+const RUN_SESSIONS: Permission[] = [
+  'attendance.read',
+  'attendance.record',
+  'sessions.read',
+  'sessions.read_own',
+  'sessions.complete',
+];
+
+/**
+ * Documenting one's own sessions. Every note write is limited to notes whose therapist
+ * is the caller's own profile, like assessments.
+ */
+const WRITE_OWN_NOTES: Permission[] = [
+  'session_note_templates.read',
+  'session_notes.read_own',
+  'session_notes.create',
+  'session_notes.update_draft',
+  'session_notes.complete',
+  'session_notes.amend',
+];
+
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // Everything, including reading (and printing) every assessment and therapy plan.
   // Clinical writes stay limited to their own assessments and plans, for admins who also
@@ -287,6 +347,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'package_enrollments.override_terms',
     'package_enrollments.cancel',
     'package_enrollments.adjust',
+    // Daily oversight and corrections, never note content.
+    ...RUN_SESSIONS,
+    'attendance.correct',
+    'sessions.correct',
+    'session_note_templates.read',
   ],
   [Role.RECEPTIONIST]: [
     'center.read',
@@ -298,13 +363,15 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     ...ASSESSMENT_STATUS,
     ...PLAN_STATUS,
     ...SELL_PACKAGES,
+    ...RUN_SESSIONS,
   ],
   // Their own therapist profile, schedule and appointments only, never colleagues'
   // records. They can confirm, complete and mark no-shows on their own sessions; booking,
   // moving and cancelling stay with the front desk. They assess the patients they see
   // (src/assessments/access.ts decides which), without access to the patient list,
   // and plan and review the treatment of those patients. No package permissions: their
-  // appointments show which package covers a session, never prices or balances.
+  // appointments show which package covers a session, never prices or balances. They
+  // run and document their own sessions, including marking attendance.
   [Role.THERAPIST]: [
     'center.read',
     ...READ_CONFIGURATION,
@@ -314,6 +381,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'appointments.manage_status',
     ...WRITE_OWN_ASSESSMENTS,
     ...WRITE_OWN_PLANS,
+    'attendance.read',
+    'attendance.record',
+    'sessions.read_own',
+    'sessions.complete',
+    ...WRITE_OWN_NOTES,
   ],
 };
 

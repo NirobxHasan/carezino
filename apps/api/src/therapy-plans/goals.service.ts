@@ -455,14 +455,21 @@ export class GoalsService {
       ) {
         errors.observation = 'Record a value, an observation or a status';
       }
+      let sessionNoteId: string | null = null;
       if (dto.correctsId) {
         if (!dto.correctionReason) {
           errors.correctionReason = 'Say why the entry is being corrected';
         }
         const original = await tx.therapyGoalProgress.findFirst({
           where: { id: dto.correctsId, goalId },
-          select: { id: true, correctedBy: { select: { id: true } } },
+          select: {
+            id: true,
+            sessionNoteId: true,
+            correctedBy: { select: { id: true } },
+          },
         });
+        // A correction stays part of the session note the original was recorded in.
+        sessionNoteId = original?.sessionNoteId ?? null;
         if (!original) {
           errors.correctsId = 'That entry belongs to another goal';
         } else if (original.correctedBy) {
@@ -488,6 +495,7 @@ export class GoalsService {
           observation: dto.observation ?? null,
           correctsId: dto.correctsId ?? null,
           correctionReason: dto.correctsId ? dto.correctionReason! : null,
+          sessionNoteId,
           recordedById: tenant.userId,
         },
         select: { id: true },

@@ -609,6 +609,13 @@ export interface AppointmentItem {
     isYou: boolean;
   };
   therapyType: { id: ID; name: string; code: string; color: string | null };
+  /** Whether the patient came; ABSENT for no-shows */
+  attendance: {
+    status: AttendanceStatus;
+    checkInAt: ISODateTime | null;
+    /** The same, as the center's wall clock */
+    checkInTime: ClockTime | null;
+  };
   /** Booked over a clash on purpose (the center allows double booking) */
   allowOverlap: boolean;
   lateCancellation: boolean;
@@ -635,7 +642,15 @@ export interface SeriesRule {
 }
 
 export type AppointmentHistoryAction =
-  'CREATED' | 'UPDATED' | 'RESCHEDULED' | 'STATUS_CHANGED' | 'CANCELLED';
+  | 'CREATED'
+  | 'UPDATED'
+  | 'RESCHEDULED'
+  | 'STATUS_CHANGED'
+  | 'CANCELLED'
+  | 'ATTENDANCE_RECORDED'
+  | 'ATTENDANCE_CORRECTED'
+  | 'SESSION_STARTED'
+  | 'SESSION_CORRECTED';
 
 /** How a booking looked at one point, as history records it */
 export interface AppointmentSnapshot {
@@ -653,6 +668,12 @@ export interface AppointmentSnapshot {
   fields?: string[];
   /** CANCELLED as part of cancelling a series' remaining appointments */
   series?: boolean;
+  /** ATTENDANCE_*: attendance and times as recorded (the note's text never is) */
+  attendance?: AttendanceStatus;
+  checkInAt?: ISODateTime | null;
+  /** SESSION_CORRECTED: what really happened, and whether a package charge was reversed */
+  outcome?: SessionCorrectionOutcome;
+  packageReversed?: boolean;
 }
 
 export interface AppointmentHistoryEntry {
@@ -1830,4 +1851,271 @@ export interface AppointmentPackage {
   chargeReason: PackageChargeReason | null;
   releaseReason: PackageReleaseReason | null;
   consumptionId: ID | null;
+}
+
+// ── Sessions: attendance, session records and notes (served by the API) ─────
+// A session is addressed by its appointment's ID. Attendance, the session's lifecycle,
+// its note and the appointment's status are separate records the API keeps in step.
+
+export type AttendanceStatus = 'NOT_MARKED' | 'PRESENT' | 'ABSENT' | 'LATE';
+export type SessionStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'VOIDED';
+export type SessionNoteStatus = 'DRAFT' | 'COMPLETED' | 'AMENDED';
+/** NONE: no note started yet */
+export type NoteState = 'NONE' | SessionNoteStatus;
+export type SessionCorrectionOutcome = 'NOT_ATTENDED' | 'NOT_DELIVERED';
+export type SessionNoteTemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+
+/** What the signed-in user may do with a session now (decided by the API) */
+export interface SessionActions {
+  checkIn: boolean;
+  markPresent: boolean;
+  markLate: boolean;
+  /** Also makes the appointment a no-show */
+  markAbsent: boolean;
+  /** After the appointment closed, with a reason */
+  correctAttendance: boolean;
+  start: boolean;
+  /** When attendance isn't marked, completing asks for it */
+  complete: boolean;
+  /** Void a completed session, reversing its package charge */
+  correct: boolean;
+  writeNote: boolean;
+  editNote: boolean;
+  viewNote: boolean;
+  amendNote: boolean;
+}
+
+/** A row of the session lists: an appointment with its attendance, session and note */
+export interface SessionItem extends Omit<AppointmentItem, 'attendance'> {
+  attendance: {
+    status: AttendanceStatus;
+    checkInAt: ISODateTime | null;
+    actualStartAt: ISODateTime | null;
+    actualEndAt: ISODateTime | null;
+    /** The same times as the center's wall clock */
+    checkInTime: ClockTime | null;
+    actualStartTime: ClockTime | null;
+    actualEndTime: ClockTime | null;
+  };
+  sessionStatus: SessionStatus;
+  /** The plan the session belongs to, once it started */
+  plan: { id: ID; code: string; status: TherapyPlanStatus } | null;
+  note: {
+    id: ID;
+    status: SessionNoteStatus;
+    completedAt: ISODateTime | null;
+    updatedAt: ISODateTime;
+  } | null;
+  noteStatus: NoteState;
+  /** The session took place but its note isn't signed off yet */
+  notePending: boolean;
+  /** No prices or balances */
+  packageUsage: AppointmentPackage['coverage'] | null;
+  sessionActions: SessionActions;
+}
+
+/** GET /sessions/:id */
+export interface SessionDetail extends SessionItem {
+  attendance: SessionItem['attendance'] & {
+    note: string | null;
+    revision: number | null;
+    recordedAt: ISODateTime | null;
+    recordedBy: { id: ID; fullName: string } | null;
+  };
+  session: {
+    status: SessionStatus;
+    startedAt: ISODateTime | null;
+    startedBy: { id: ID; fullName: string } | null;
+    completedAt: ISODateTime | null;
+    completedBy: { id: ID; fullName: string } | null;
+    voidedAt: ISODateTime | null;
+    voidedBy: { id: ID; fullName: string } | null;
+    voidReason: string | null;
+  };
+  note:
+    | (NonNullable<SessionItem['note']> & {
+        completedBy: { id: ID; fullName: string } | null;
+        therapist: { id: ID; fullName: string };
+      })
+    | null;
+  /** The plan the session belongs to, if the caller may see plans */
+  plan: { id: ID; code: string; title: string; status: TherapyPlanStatus } | null;
+  package: Omit<AppointmentPackage, 'consumptionId'> | null;
+  history: AppointmentHistoryEntry[];
+}
+
+/** GET /sessions/today */
+export interface TodaySessions extends Paginated<SessionItem> {
+  date: ISODate;
+  timezone: string;
+  /** For the whole day, whatever the filters */
+  summary: {
+    expected: number;
+    arrived: number;
+    notMarked: number;
+    absent: number;
+    completed: number;
+    cancelled: number;
+    notesPending: number;
+  };
+}
+
+/** GET /my-sessions */
+export interface MySessions {
+  therapist: { id: ID; code: string; fullName: string } | null;
+  today: SessionItem[];
+  /** Oldest first */
+  pendingNotes: SessionItem[];
+  recent: SessionItem[];
+}
+
+/** GET /patients/:id/sessions */
+export interface PatientSessions extends Paginated<
+  SessionItem & {
+    /** Goals with progress in the note; null without clinical access */
+    goalsRecorded: number | null;
+  }
+> {
+  patient: { id: ID; code: string; fullName: string };
+}
+
+/** Progress for one goal, as a note records it */
+export interface NoteGoalEntry {
+  goalId: ID;
+  observation: string | null;
+  measuredValue: number | null;
+  goalStatus: TherapyGoalStatus | null;
+  /** Completed notes: the progress entry it was recorded as */
+  progressId?: ID;
+}
+
+/** A goal of the session's plan, to choose from */
+export interface NotePlanGoal {
+  id: ID;
+  title: string;
+  description: string | null;
+  status: TherapyGoalStatus;
+  measurementType: GoalMeasurementType;
+  measurementConfig: MeasurementConfig | null;
+  baselineText: string | null;
+  baselineValue: number | null;
+  targetText: string | null;
+  targetValue: number | null;
+  targetDate: ISODate | null;
+  category: { id: ID; name: string } | null;
+  latestProgress: {
+    observationDate: ISODate;
+    measuredValue: number | null;
+    goalStatus: TherapyGoalStatus | null;
+  } | null;
+}
+
+/** GET /sessions/:id/note */
+export interface SessionNoteDetail {
+  id: ID;
+  appointmentId: ID;
+  status: SessionNoteStatus;
+  revision: number;
+  session: {
+    appointmentId: ID;
+    date: ISODate;
+    startTime: ClockTime;
+    endTime: ClockTime;
+    appointmentStatus: AppointmentRecordStatus;
+    sessionStatus: SessionStatus;
+    patient: { id: ID; code: string; fullName: string };
+    therapyType: { id: ID; name: string; code: string; color: string | null };
+  };
+  template: {
+    id: ID;
+    name: string;
+    description: string | null;
+    versionId: ID;
+    version: number;
+    versionStatus: TemplateVersionStatus;
+  };
+  form: TemplateDefinition;
+  answers: Answers;
+  goals: NoteGoalEntry[];
+  plan: { id: ID; code: string; title: string; status: TherapyPlanStatus } | null;
+  planGoals: NotePlanGoal[];
+  therapist: { id: ID; code: string; fullName: string; designation: string | null; isYou: boolean };
+  createdBy: { id: ID; fullName: string };
+  updatedBy: { id: ID; fullName: string } | null;
+  completedBy: { id: ID; fullName: string } | null;
+  completedAt: ISODateTime | null;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  amendments: {
+    number: number;
+    reason: string;
+    /** Labels of what changed, never values */
+    changedFields: string[];
+    amendedAt: ISODateTime;
+    amendedBy: { id: ID; fullName: string };
+  }[];
+  actions: { edit: boolean; complete: boolean; amend: boolean; discard: boolean };
+}
+
+/** GET /sessions/:id/note/amendments/:number: the note before that correction */
+export interface NoteAmendmentSnapshot {
+  number: number;
+  reason: string;
+  changedFields: string[];
+  amendedAt: ISODateTime;
+  amendedBy: { id: ID; fullName: string };
+  previousRevision: number;
+  previousContent: { answers: Answers; goals: NoteGoalEntry[] };
+  form: TemplateDefinition;
+}
+
+/** GET /session-note-templates */
+export interface NoteTemplateItem {
+  id: ID;
+  name: string;
+  description: string | null;
+  status: SessionNoteTemplateStatus;
+  /** Preselected for new notes of its therapy (or, if general, of any without one) */
+  isDefault: boolean;
+  /** Null: a general template for every therapy */
+  therapyType: {
+    id: ID;
+    name: string;
+    code: string;
+    color: string | null;
+    isActive: boolean;
+  } | null;
+  latestVersion: number;
+  published: { id: ID; version: number; publishedAt: ISODateTime; fieldCount: number } | null;
+  draft: { id: ID; version: number; updatedAt: ISODateTime } | null;
+  noteCount: number;
+  createdBy: { id: ID; fullName: string };
+  archivedAt: ISODateTime | null;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  actions: {
+    edit: boolean;
+    startVersion: boolean;
+    discardDraft: boolean;
+    publish: boolean;
+    archive: boolean;
+    restore: boolean;
+    makeDefault: boolean;
+  };
+}
+
+/** GET /session-note-templates/:id */
+export interface NoteTemplateDetail extends Omit<NoteTemplateItem, 'draft' | 'published'> {
+  draft: (NonNullable<NoteTemplateItem['draft']> & { definition: TemplateDefinition }) | null;
+  published:
+    | (NonNullable<NoteTemplateItem['published']> & {
+        publishedBy: { id: ID; fullName: string } | null;
+        definition: TemplateDefinition;
+      })
+    | null;
+}
+
+/** GET /session-note-templates/:id/versions */
+export interface NoteTemplateVersionItem extends Omit<TemplateVersionItem, 'assessmentCount'> {
+  noteCount: number;
 }
