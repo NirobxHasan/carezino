@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { BillingModule } from '../billing/billing.module';
 import { CenterSettingsModule } from '../center-settings/center-settings.module';
 import { PackagesModule } from '../packages/packages.module';
 import { SessionsModule } from '../sessions/sessions.module';
@@ -17,6 +18,8 @@ import { SeriesService } from './series.service';
     TherapistsModule,
     PackagesModule,
     SessionsModule,
+    // Invoices assessments on booking when the center's policy says so.
+    BillingModule,
   ],
   controllers: [AppointmentsController, SeriesController],
   providers: [BookingService, AppointmentsService, SeriesService],

@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 
 import type { TenantContext } from '../auth/auth-context';
+import { BillingEvents } from '../billing/events.service';
 import { LIMITS } from '../center-settings/limits';
 import { apiError } from '../common/errors';
 import {
@@ -457,6 +458,7 @@ export class AppointmentsService {
     private readonly booking: BookingService,
     private readonly packages: PackageSessions,
     @Inject(SESSION_OUTCOMES) private readonly sessions: SessionOutcomes,
+    private readonly billing: BillingEvents,
   ) {}
 
   async view(tenant: TenantContext, policy?: Policy): Promise<View> {
@@ -855,6 +857,8 @@ export class AppointmentsService {
       });
       return row.id;
     });
+    // After the booking has committed: billing never undoes it.
+    await this.billing.appointmentBooked(tenant, id);
     return this.get(tenant, id);
   }
 

@@ -5,15 +5,15 @@ import type {
   AppNotification,
   Assessment,
   Center,
-  Expense,
-  ExpenseCategory,
+  PrototypeExpense,
+  PrototypeExpenseCategory,
   Goal,
-  Invoice,
+  PrototypeInvoice,
   Patient,
   PatientPackage,
   PatientStatus,
-  Payment,
-  PaymentMethod,
+  PrototypePayment,
+  PrototypePaymentMethod,
   SessionNote,
   Therapist,
   TherapyPackage,
@@ -893,15 +893,23 @@ export function createSeed() {
   }
 
   // ── Billing ──────────────────────────────────────────────────────────────
-  const invoices: Invoice[] = [];
-  const payments: Payment[] = [];
-  const methods: PaymentMethod[] = ['cash', 'cash', 'bkash', 'bkash', 'nagad', 'card', 'bank'];
+  const invoices: PrototypeInvoice[] = [];
+  const payments: PrototypePayment[] = [];
+  const methods: PrototypePaymentMethod[] = [
+    'cash',
+    'cash',
+    'bkash',
+    'bkash',
+    'nagad',
+    'card',
+    'bank',
+  ];
   const receivers = ['Rafiq Uddin', 'Rafiq Uddin', 'Nadia Chowdhury'];
 
   for (const pkg of patientPackages) {
     const issued = new Date(pkg.startDate);
     const due = addDays(issued, 7);
-    const invoice: Invoice = {
+    const invoice: PrototypeInvoice = {
       id: `inv_${invoices.length + 1}`,
       number: `INV-${format(issued, 'yyMM')}-${String(invoices.length + 101).padStart(4, '0')}`,
       patientId: pkg.patientId,
@@ -951,7 +959,7 @@ export function createSeed() {
     .forEach((patient, i) => {
       const issued = today;
       const amount = i % 2 === 0 ? 1500 : 2500;
-      const invoice: Invoice = {
+      const invoice: PrototypeInvoice = {
         id: `inv_${invoices.length + 1}`,
         number: `INV-${format(issued, 'yyMM')}-${String(invoices.length + 101).padStart(4, '0')}`,
         patientId: patient.id,
@@ -985,8 +993,8 @@ export function createSeed() {
       }
     });
 
-  const expenses: Expense[] = [];
-  const expenseLines: [ExpenseCategory, string, number, string][] = [
+  const expenses: PrototypeExpense[] = [];
+  const expenseLines: [PrototypeExpenseCategory, string, number, string][] = [
     ['rent', 'Monthly rent – Dhanmondi premises', 180000, 'Landlord'],
     ['salary', 'Therapist & staff salaries', 640000, 'Payroll'],
     ['utilities', 'Electricity (DESCO)', 14500, 'DESCO'],

@@ -29,6 +29,7 @@ const TABS: { href: string; label: string; permission: Permission }[] = [
   { href: '/settings/holidays', label: 'Holidays & closures', permission: 'center_settings.read' },
   { href: '/settings/scheduling', label: 'Scheduling', permission: 'center_settings.read' },
   { href: '/settings/general', label: 'General', permission: 'center_settings.read' },
+  { href: '/settings/billing', label: 'Billing', permission: 'billing.read' },
   { href: '/settings/staff', label: 'Staff & permissions', permission: 'staff.read' },
 ];
 

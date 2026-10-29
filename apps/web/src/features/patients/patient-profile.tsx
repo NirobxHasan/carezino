@@ -17,6 +17,7 @@ import {
   UserPlus,
   UserSearch,
   UserX,
+  Wallet,
   X,
 } from 'lucide-react';
 
@@ -35,6 +36,7 @@ import { useSession } from '@/lib/session';
 import type { PatientDetail } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { appointmentLinks } from '../appointments/appointment-display';
+import { PatientBillingPanel } from '../finance/patient-billing';
 import { AppointmentsPanel } from '../appointments/appointments-panel';
 import { PatientAssessmentsPanel } from '../assessments/patient-assessments';
 import { packageLinks } from '../packages/package-display';
@@ -213,13 +215,15 @@ function RegisteredBanner({ patient }: { patient: PatientDetail }) {
   );
 }
 
-type Tab = 'overview' | 'appointments' | 'sessions' | 'assessments' | 'plans' | 'packages';
+type Tab =
+  'overview' | 'appointments' | 'sessions' | 'assessments' | 'plans' | 'packages' | 'billing';
 const TABS: Exclude<Tab, 'overview'>[] = [
   'appointments',
   'sessions',
   'assessments',
   'plans',
   'packages',
+  'billing',
 ];
 
 function PatientProfile() {
@@ -234,6 +238,7 @@ function PatientProfile() {
     assessments: can('assessments.read_own'),
     plans: can('therapy_plans.read_own'),
     packages: can('package_enrollments.read'),
+    billing: can('invoices.read'),
   };
   const requested = TABS.find((t) => t === searchParams.get('tab'));
   const tab: Tab = requested && tabs[requested] ? requested : 'overview';
@@ -319,7 +324,6 @@ function PatientProfile() {
           </>
         }
       />
-      {/* Billing gets its own tab here once that module exists. */}
       {Object.values(tabs).some(Boolean) ? (
         <Tabs
           value={tab}
@@ -359,6 +363,11 @@ function PatientProfile() {
                 <Ticket /> Packages
               </TabsTrigger>
             )}
+            {tabs.billing && (
+              <TabsTrigger value="billing">
+                <Wallet /> Billing
+              </TabsTrigger>
+            )}
           </TabsList>
           <TabsContent value="overview">
             <Overview patient={patient} />
@@ -375,6 +384,9 @@ function PatientProfile() {
           </TabsContent>
           <TabsContent value="plans">
             <PatientPlansPanel patientId={id} />
+          </TabsContent>
+          <TabsContent value="billing">
+            <PatientBillingPanel patient={patient} />
           </TabsContent>
           <TabsContent value="packages">
             <PatientPackagesPanel patientId={id} canEnroll={patient.status !== 'INACTIVE'} />

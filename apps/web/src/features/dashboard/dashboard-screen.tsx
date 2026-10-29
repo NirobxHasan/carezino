@@ -30,7 +30,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { SegmentedList, SegmentedTrigger, Tabs } from '@/components/ui/tabs';
 import { AppointmentCard } from './prototype/appointment-card';
-import { paymentMethodLabels } from '@/lib/api/finance';
+import { paymentMethodLabels } from '@/lib/api/prototype-finance';
 import { useDashboard, type DashboardAlert } from '@/lib/api/dashboard';
 import { formatAgo, formatRelativeDay, formatTaka, formatTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
@@ -47,7 +47,8 @@ export function DashboardScreen() {
   const { data, isLoading, error, refetch } = useDashboard({ therapistId });
   const [filterChoice, setFilter] = React.useState<'remaining' | 'all' | 'done' | null>(null);
   const now = new Date();
-  const finance = can('finance.view');
+  // The dashboard's money figures are still the prototype's; shown to whoever sees finances.
+  const finance = can('payments.read');
 
   const sessions = data?.todaySessions ?? [];
   const live = sessions.filter((a) => a.status !== 'cancelled');
@@ -138,7 +139,7 @@ export function DashboardScreen() {
                 hint={`${data?.kpis.todayPaymentsCount ?? 0} payments received`}
                 icon={Wallet}
                 tone="success"
-                href="/finance?tab=payments"
+                href="/finance/payments"
                 loading={isLoading}
               />
             )}
@@ -149,7 +150,7 @@ export function DashboardScreen() {
                 hint={`${data?.kpis.pendingInvoices ?? 0} unpaid invoices`}
                 icon={Receipt}
                 tone="warning"
-                href="/finance?tab=dues"
+                href="/finance/dues"
                 loading={isLoading}
               />
             )}
@@ -320,7 +321,7 @@ export function DashboardScreen() {
                     <CardDescription>Latest money received</CardDescription>
                   </div>
                   <Button variant="link" size="sm" asChild>
-                    <Link href="/finance?tab=payments">View all</Link>
+                    <Link href="/finance/payments">View all</Link>
                   </Button>
                 </CardHeader>
                 {isLoading ? (

@@ -75,6 +75,17 @@ model Center {
   noteTemplateVersions SessionNoteTemplateVersion[]
   sessionNotes         SessionNote[]
   noteAmendments       SessionNoteAmendment[]
+  billingSettings      CenterBillingSettings?
+  paymentMethods       PaymentMethod[]
+  billableServices     BillableService[]
+  invoices             Invoice[]
+  invoiceItems         InvoiceItem[]
+  payments             Payment[]
+  paymentAllocations   PaymentAllocation[]
+  refunds              Refund[]
+  expenseCategories    ExpenseCategory[]
+  expenses             Expense[]
+  expenseRevisions     ExpenseRevision[]
 }
 
 /// Per-center counters for human-readable numbers such as patient codes. A number is
@@ -163,6 +174,21 @@ model User {
   sessionNotesUpdated       SessionNote[]                @relation("SessionNoteUpdatedBy")
   sessionNotesCompleted     SessionNote[]                @relation("SessionNoteCompletedBy")
   sessionNoteAmendments     SessionNoteAmendment[]       @relation("SessionNoteAmendedBy")
+  servicesCreated           BillableService[]            @relation("BillableServiceCreatedBy")
+  servicesUpdated           BillableService[]            @relation("BillableServiceUpdatedBy")
+  invoicesCreated           Invoice[]                    @relation("InvoiceCreatedBy")
+  invoicesUpdated           Invoice[]                    @relation("InvoiceUpdatedBy")
+  invoicesIssued            Invoice[]                    @relation("InvoiceIssuedBy")
+  invoicesVoided            Invoice[]                    @relation("InvoiceVoidedBy")
+  paymentsCollected         Payment[]                    @relation("PaymentCollectedBy")
+  paymentsReversed          Payment[]                    @relation("PaymentReversedBy")
+  allocationsCreated        PaymentAllocation[]          @relation("AllocationCreatedBy")
+  allocationsReleased       PaymentAllocation[]          @relation("AllocationReleasedBy")
+  refundsApproved           Refund[]                     @relation("RefundApprovedBy")
+  expensesCreated           Expense[]                    @relation("ExpenseCreatedBy")
+  expensesUpdated           Expense[]                    @relation("ExpenseUpdatedBy")
+  expensesVoided            Expense[]                    @relation("ExpenseVoidedBy")
+  expenseRevisions          ExpenseRevision[]            @relation("ExpenseRevisedBy")
 }
 
 // ── Access ──────────────────────────────────────────────────────────────────
@@ -276,6 +302,8 @@ model AuditLog {
   actor  User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([centerId, createdAt])
+  /// One record's history, e.g. an invoice's
+  @@index([centerId, entityType, entityId])
 }
 
 // ── Therapy services ────────────────────────────────────────────────────────
@@ -314,6 +342,7 @@ model TherapyType {
   packages            PackageEligibleTherapyType[]
   enrollments         PackageEnrollmentTherapyType[]
   noteTemplates       SessionNoteTemplate[]
+  billableServices    BillableService[]
 
   @@unique([centerId, code])
   @@unique([centerId, name])
@@ -679,6 +708,8 @@ model Patient {
   assessments      Assessment[]
   therapyPlans     TherapyPlan[]
   packages         PackageEnrollment[]
+  invoices         Invoice[]
+  payments         Payment[]
 
   @@unique([centerId, code])
   @@index([centerId, deletedAt, status])
@@ -936,6 +967,8 @@ model Appointment {
   attendance          SessionAttendance?
   /// Therapy sessions only: the session's lifecycle and, through it, its note
   session             TherapySession?
+  /// Invoice lines charging for it (see billing)
+  invoiceItems        InvoiceItem[]
 
   @@index([centerId, startAt])
   @@index([centerId, status, startAt])
@@ -1764,6 +1797,7 @@ model PackageEnrollment {
   ledger       PackageSessionLedger[]
   reservations PackageSessionReservation[]
   appointments Appointment[]
+  invoiceItems InvoiceItem[]
 
   @@unique([centerId, code])
   @@unique([centerId, requestId])
@@ -2072,4 +2106,445 @@ model SessionNoteAmendment {
   amendedBy User        @relation("SessionNoteAmendedBy", fields: [amendedById], references: [id], onDelete: Restrict)
 
   @@unique([noteId, number])
+}
+
+// ── Billing & basic accounting ──────────────────────────────────────────────
+// An operational billing and cashbook, not a general ledger. Each record is one thing:
+// - Invoice: what the patient owes (an obligation), with InvoiceItem lines. Lines that
+//   charge for an operational event point at it (a package enrollment, an assessment
+//   or session appointment), and partial unique indexes in the billing migration allow
+//   one live charge per event, so retries and repeated clicks can't bill twice.
+// - Payment: money received from a patient's payer, with its receipt number.
+// - PaymentAllocation: how much of one payment is applied to one invoice. Money not
+//   allocated is the patient's unapplied credit. Allocations are never edited: a wrong
+//   one is released (with a reason) and the money becomes credit again.
+// - Refund: money given back from a payment's unapplied part. A reversal instead marks
+//   a payment recorded in error (REVERSED); neither ever deletes or edits the payment.
+// - Expense: money the center spent.
+//
+// Package entitlement (sessions) belongs to the packages module and never changes here;
+// an enrollment's agreed price is what billing invoices. Invoice.paidAmount and
+// Payment.allocatedAmount/refundedAmount are projections of allocation and refund rows
+// kept by triggers (never written by the API), with CHECKs that refuse over-allocation
+// and over-refunding even under concurrent requests. Money is NUMERIC(12, 2).
+
+enum BillableServiceCategory {
+  ASSESSMENT
+  THERAPY_SESSION
+  OTHER
+}
+
+/// When an assessment's fee is invoiced.
+enum AssessmentBillingPolicy {
+  /// Automatically, issued when the assessment is booked
+  ON_BOOKING
+  /// Only when staff invoice it
+  MANUAL
+}
+
+/// When a session not covered by a package is invoiced.
+enum SessionBillingPolicy {
+  /// Automatically, issued when the session is completed
+  ON_COMPLETION
+  MANUAL
+}
+
+/// When a package enrollment is invoiced.
+enum PackageBillingPolicy {
+  /// Automatically, issued when the patient is enrolled
+  ON_ENROLLMENT
+  MANUAL
+}
+
+/// DRAFT: editable, not yet owed and without a number. ISSUED / PARTIALLY_PAID / PAID
+/// follow its allocations (kept by a trigger). VOID: cancelled, final. Overdue isn't a
+/// status: it's derived from the due date and the balance.
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+/// What an invoice line charges for, and so what it must point at.
+enum InvoiceItemKind {
+  /// A package enrollment's agreed price (packageEnrollmentId)
+  PACKAGE
+  /// An assessment appointment's fee (appointmentId)
+  ASSESSMENT_FEE
+  /// A therapy session not covered by a package (appointmentId)
+  SESSION_FEE
+  /// An authorized extra charge for an appointment, e.g. a no-show fee (appointmentId)
+  ADDITIONAL_FEE
+  /// Anything else: a catalog service or a described charge
+  OTHER
+}
+
+enum BillingDiscountType {
+  FIXED
+  PERCENTAGE
+}
+
+enum PaymentStatus {
+  RECORDED
+  /// Recorded in error and cancelled; it counts for nothing
+  REVERSED
+}
+
+enum AllocationReleaseReason {
+  /// Taken off the invoice by staff, e.g. applied to the wrong one
+  REALLOCATED
+  INVOICE_VOIDED
+  PAYMENT_REVERSED
+}
+
+enum ExpenseStatus {
+  RECORDED
+  VOID
+}
+
+/// Billing preferences. Currency and time zone are the center's own (Center).
+model CenterBillingSettings {
+  centerId                String                  @id @db.Uuid
+  /// Prefixes apply to numbers taken from now on, e.g. "INV-" gives INV-000125
+  invoicePrefix           String                  @default("INV-")
+  receiptPrefix           String                  @default("RCP-")
+  /// Days from the invoice date to its due date; 0 means due on the day
+  defaultDueDays          Int                     @default(7)
+  allowPartialPayment     Boolean                 @default(true)
+  /// Payments larger than what they're applied to, kept as the patient's credit
+  allowAdvancePayment     Boolean                 @default(true)
+  allowManualDiscount     Boolean                 @default(true)
+  /// Percentage applied to every new invoice's discounted subtotal; 0 means no tax
+  taxRate                 Decimal                 @default(0) @db.Decimal(5, 2)
+  taxLabel                String                  @default("VAT")
+  assessmentBillingPolicy AssessmentBillingPolicy @default(MANUAL)
+  sessionBillingPolicy    SessionBillingPolicy    @default(MANUAL)
+  packageBillingPolicy    PackageBillingPolicy    @default(MANUAL)
+  updatedAt               DateTime                @updatedAt
+
+  center Center @relation(fields: [centerId], references: [id], onDelete: Restrict)
+}
+
+/// A way the center takes or pays money: cash, bKash, a bank account. Not a gateway.
+model PaymentMethod {
+  id                String   @id @default(uuid()) @db.Uuid
+  centerId          String   @db.Uuid
+  /// Unique per center, case-insensitively (index in the billing migration)
+  name              String
+  /// Payments by this method need a transaction reference
+  requiresReference Boolean  @default(false)
+  /// Inactive methods stay on past records but can't be chosen
+  isActive          Boolean  @default(true)
+  displayOrder      Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  center   Center    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  payments Payment[]
+  refunds  Refund[]
+  expenses Expense[]
+
+  @@index([centerId, isActive, displayOrder])
+}
+
+/// A priced service the center charges for. Invoice lines copy the price they used.
+model BillableService {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  centerId               String                  @db.Uuid
+  /// Unique per center, stored upper-cased, e.g. OT-ASSESS
+  code                   String
+  name                   String
+  category               BillableServiceCategory
+  /// The therapy it's for; null: any therapy (or none)
+  therapyTypeId          String?                 @db.Uuid
+  price                  Decimal                 @db.Decimal(12, 2)
+  defaultDurationMinutes Int?
+  description            String?
+  /// Inactive services can't be put on new invoice lines
+  isActive               Boolean                 @default(true)
+  displayOrder           Int                     @default(0)
+  createdById            String                  @db.Uuid
+  updatedById            String?                 @db.Uuid
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  center      Center        @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  therapyType TherapyType?  @relation(fields: [therapyTypeId], references: [id], onDelete: Restrict)
+  createdBy   User          @relation("BillableServiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy   User?         @relation("BillableServiceUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  items       InvoiceItem[]
+
+  @@unique([centerId, code])
+  @@index([centerId, category, isActive])
+}
+
+/// Never deleted once issued; a draft can be discarded. Issued terms never change.
+model Invoice {
+  id                    String               @id @default(uuid()) @db.Uuid
+  centerId              String               @db.Uuid
+  /// Taken when issued, e.g. INV-000125; null while DRAFT
+  number                String?
+  patientId             String               @db.Uuid
+  /// Center-local dates
+  invoiceDate           DateTime             @db.Date
+  dueDate               DateTime?            @db.Date
+  /// The center's currency when created
+  currency              String
+  /// Sum of line amounts (quantity × unit price)
+  subtotal              Decimal              @default(0) @db.Decimal(12, 2)
+  /// Line discounts plus the invoice discount
+  discountAmount        Decimal              @default(0) @db.Decimal(12, 2)
+  /// A discount on the whole invoice, after line discounts; null: none
+  invoiceDiscountType   BillingDiscountType?
+  /// The amount (FIXED) or percentage (PERCENTAGE) given
+  invoiceDiscountValue  Decimal?             @db.Decimal(12, 2)
+  invoiceDiscountAmount Decimal              @default(0) @db.Decimal(12, 2)
+  /// The tax rate and label when created; tax is charged on subtotal − discounts
+  taxRate               Decimal              @default(0) @db.Decimal(5, 2)
+  taxLabel              String?
+  taxAmount             Decimal              @default(0) @db.Decimal(12, 2)
+  /// subtotal − discountAmount + taxAmount
+  totalAmount           Decimal              @default(0) @db.Decimal(12, 2)
+  /// Active allocations; kept by a trigger, never written by the API
+  paidAmount            Decimal              @default(0) @db.Decimal(12, 2)
+  status                InvoiceStatus        @default(DRAFT)
+  notes                 String?
+  /// Created automatically by a billing policy rather than by staff
+  automatic             Boolean              @default(false)
+  /// The voided invoice this one replaces, if any
+  reissuedFromId        String?              @db.Uuid
+  /// Client-generated key: the same draft sent twice creates one invoice
+  requestId             String?              @db.Uuid
+  /// Bumped on every draft change; edits may send the revision they started from
+  revision              Int                  @default(1)
+  createdById           String               @db.Uuid
+  updatedById           String?              @db.Uuid
+  issuedAt              DateTime?
+  issuedById            String?              @db.Uuid
+  voidedAt              DateTime?
+  voidedById            String?              @db.Uuid
+  voidReason            String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  center       Center              @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient      Patient             @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  reissuedFrom Invoice?            @relation("InvoiceReissue", fields: [reissuedFromId], references: [id], onDelete: Restrict)
+  reissues     Invoice[]           @relation("InvoiceReissue")
+  createdBy    User                @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy    User?               @relation("InvoiceUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  issuedBy     User?               @relation("InvoiceIssuedBy", fields: [issuedById], references: [id], onDelete: Restrict)
+  voidedBy     User?               @relation("InvoiceVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  items        InvoiceItem[]
+  allocations  PaymentAllocation[]
+
+  @@unique([centerId, number])
+  @@unique([centerId, requestId])
+  @@index([centerId, status, dueDate])
+  @@index([centerId, invoiceDate])
+  @@index([patientId, createdAt])
+}
+
+/// One line of an invoice. Prices are copied from the service or enrollment, so later
+/// catalog changes never touch it. Lines of issued invoices never change.
+model InvoiceItem {
+  id                  String               @id @default(uuid()) @db.Uuid
+  centerId            String               @db.Uuid
+  invoiceId           String               @db.Uuid
+  position            Int
+  kind                InvoiceItemKind
+  description         String
+  serviceId           String?              @db.Uuid
+  appointmentId       String?              @db.Uuid
+  packageEnrollmentId String?              @db.Uuid
+  quantity            Int                  @default(1)
+  unitPrice           Decimal              @db.Decimal(12, 2)
+  /// quantity × unitPrice
+  amount              Decimal              @db.Decimal(12, 2)
+  discountType        BillingDiscountType?
+  discountValue       Decimal?             @db.Decimal(12, 2)
+  discountAmount      Decimal              @default(0) @db.Decimal(12, 2)
+  /// amount − discountAmount
+  totalAmount         Decimal              @db.Decimal(12, 2)
+  /// False once its invoice is voided, which frees the event it charges for
+  active              Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+
+  center            Center             @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  invoice           Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  service           BillableService?   @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  appointment       Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  packageEnrollment PackageEnrollment? @relation(fields: [packageEnrollmentId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, position])
+  @@index([appointmentId])
+  @@index([packageEnrollmentId])
+  @@index([serviceId])
+}
+
+/// Money received. Never deleted or edited; corrected by reversal or refund.
+model Payment {
+  id                   String        @id @default(uuid()) @db.Uuid
+  centerId             String        @db.Uuid
+  /// The receipt number, e.g. RCP-000001
+  number               String
+  patientId            String        @db.Uuid
+  amount               Decimal       @db.Decimal(12, 2)
+  currency             String
+  methodId             String        @db.Uuid
+  transactionReference String?
+  /// When the money was received
+  collectedAt          DateTime
+  collectedById        String        @db.Uuid
+  notes                String?
+  status               PaymentStatus @default(RECORDED)
+  /// Kept by triggers from allocations and refunds; never written by the API
+  allocatedAmount      Decimal       @default(0) @db.Decimal(12, 2)
+  refundedAmount       Decimal       @default(0) @db.Decimal(12, 2)
+  reversedAt           DateTime?
+  reversedById         String?       @db.Uuid
+  reversalReason       String?
+  /// Client-generated key: the same submission sent twice records one payment
+  requestId            String?       @db.Uuid
+  createdAt            DateTime      @default(now())
+
+  center      Center              @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  patient     Patient             @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  method      PaymentMethod       @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  collectedBy User                @relation("PaymentCollectedBy", fields: [collectedById], references: [id], onDelete: Restrict)
+  reversedBy  User?               @relation("PaymentReversedBy", fields: [reversedById], references: [id], onDelete: Restrict)
+  allocations PaymentAllocation[]
+  refunds     Refund[]
+
+  @@unique([centerId, number])
+  @@unique([centerId, requestId])
+  @@index([centerId, collectedAt])
+  @@index([patientId, collectedAt])
+}
+
+/// Part of a payment applied to an invoice of the same patient. Released, never edited.
+model PaymentAllocation {
+  id            String                   @id @default(uuid()) @db.Uuid
+  centerId      String                   @db.Uuid
+  paymentId     String                   @db.Uuid
+  invoiceId     String                   @db.Uuid
+  amount        Decimal                  @db.Decimal(12, 2)
+  /// Client-generated key of the request that made it, for safe retries
+  requestId     String?                  @db.Uuid
+  createdById   String                   @db.Uuid
+  createdAt     DateTime                 @default(now())
+  releasedAt    DateTime?
+  releasedById  String?                  @db.Uuid
+  releaseReason AllocationReleaseReason?
+  releaseNote   String?
+
+  center     Center  @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  payment    Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  createdBy  User    @relation("AllocationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  releasedBy User?   @relation("AllocationReleasedBy", fields: [releasedById], references: [id], onDelete: Restrict)
+
+  @@unique([paymentId, requestId])
+  @@index([invoiceId])
+  @@index([paymentId])
+  @@index([centerId, requestId])
+}
+
+/// Money returned to the payer from a payment's unapplied part. Append-only.
+model Refund {
+  id           String   @id @default(uuid()) @db.Uuid
+  centerId     String   @db.Uuid
+  paymentId    String   @db.Uuid
+  amount       Decimal  @db.Decimal(12, 2)
+  methodId     String   @db.Uuid
+  reason       String
+  reference    String?
+  refundedAt   DateTime
+  /// The staff member who approved and recorded it
+  approvedById String   @db.Uuid
+  requestId    String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  center     Center        @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  payment    Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  method     PaymentMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  approvedBy User          @relation("RefundApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@unique([centerId, requestId])
+  @@index([paymentId])
+  @@index([centerId, refundedAt])
+}
+
+model ExpenseCategory {
+  id           String   @id @default(uuid()) @db.Uuid
+  centerId     String   @db.Uuid
+  /// Unique per center, case-insensitively (index in the billing migration)
+  name         String
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  center   Center    @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  expenses Expense[]
+
+  @@index([centerId, isActive, displayOrder])
+}
+
+/// Money the center spent. Corrections keep an ExpenseRevision; voiding keeps the row.
+model Expense {
+  id          String        @id @default(uuid()) @db.Uuid
+  centerId    String        @db.Uuid
+  categoryId  String        @db.Uuid
+  /// Center-local date
+  expenseDate DateTime      @db.Date
+  description String
+  amount      Decimal       @db.Decimal(12, 2)
+  methodId    String        @db.Uuid
+  reference   String?
+  notes       String?
+  status      ExpenseStatus @default(RECORDED)
+  requestId   String?       @db.Uuid
+  revision    Int           @default(1)
+  createdById String        @db.Uuid
+  updatedById String?       @db.Uuid
+  voidedAt    DateTime?
+  voidedById  String?       @db.Uuid
+  voidReason  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  center    Center            @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  category  ExpenseCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  method    PaymentMethod     @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  createdBy User              @relation("ExpenseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?             @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  voidedBy  User?             @relation("ExpenseVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  revisions ExpenseRevision[]
+
+  @@unique([centerId, requestId])
+  @@index([centerId, expenseDate])
+  @@index([centerId, status, expenseDate])
+}
+
+/// One correction of an expense, append-only, with the values before and after.
+model ExpenseRevision {
+  id          String   @id @default(uuid()) @db.Uuid
+  centerId    String   @db.Uuid
+  expenseId   String   @db.Uuid
+  reason      String
+  /// Names of the fields that changed
+  changed     Json
+  before      Json
+  after       Json
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  center    Center  @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Restrict)
+  createdBy User    @relation("ExpenseRevisedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([expenseId, createdAt])
 }

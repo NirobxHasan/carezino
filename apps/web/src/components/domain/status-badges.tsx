@@ -15,11 +15,11 @@ import { Badge, type BadgeTone } from '@/components/ui/badge';
 import type {
   AppointmentStatus,
   AssessmentStatus,
-  InvoiceStatus,
+  PrototypeInvoiceStatus,
   NoteStatus,
   PatientPackageStatus,
   PatientStatus,
-  PaymentStatus,
+  PrototypePaymentStatus,
   TherapistStatus,
 } from '@/lib/types';
 
@@ -88,7 +88,7 @@ export function TherapistStatusBadge({ status }: { status: TherapistStatus | 'of
   return <StatusBadge def={therapistStatus[status]} />;
 }
 
-const invoiceStatus: Record<InvoiceStatus, StatusDef> = {
+const invoiceStatus: Record<PrototypeInvoiceStatus, StatusDef> = {
   paid: { label: 'Paid', tone: 'success', icon: CheckCircle2 },
   partial: { label: 'Partly paid', tone: 'warning', icon: CircleDashed },
   unpaid: { label: 'Unpaid', tone: 'info', icon: Clock },
@@ -96,17 +96,17 @@ const invoiceStatus: Record<InvoiceStatus, StatusDef> = {
   void: { label: 'Void', tone: 'neutral', icon: Ban },
 };
 
-export function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
+export function InvoiceStatusBadge({ status }: { status: PrototypeInvoiceStatus }) {
   return <StatusBadge def={invoiceStatus[status]} />;
 }
 
-const paymentStatus: Record<PaymentStatus, StatusDef> = {
+const paymentStatus: Record<PrototypePaymentStatus, StatusDef> = {
   paid: { label: 'Paid', tone: 'success', icon: CheckCircle2 },
   partial: { label: 'Partly paid', tone: 'warning', icon: CircleDashed },
   unpaid: { label: 'Unpaid', tone: 'danger', icon: Clock },
 };
 
-export function PaymentStatusBadge({ status }: { status: PaymentStatus }) {
+export function PaymentStatusBadge({ status }: { status: PrototypePaymentStatus }) {
   return <StatusBadge def={paymentStatus[status]} />;
 }
 

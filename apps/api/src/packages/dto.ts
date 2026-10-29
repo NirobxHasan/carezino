@@ -19,7 +19,15 @@ import {
   ValidateIf,
 } from 'class-validator';
 
-import { EmptyToNull, IfPresent, Trim, TrimOrNull } from '../common/validation';
+import {
+  CommaList,
+  EmptyToNull,
+  IfPresent,
+  Money,
+  Trim,
+  TrimOrNull,
+  applyAll,
+} from '../common/validation';
 import {
   AppointmentType,
   PackageActivationPolicy,
@@ -35,43 +43,7 @@ import {
 const L = PACKAGE_LIMITS;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_MESSAGE = 'Choose a date';
-/** Up to 10 digits and 2 decimals, matching NUMERIC(12, 2) */
-const MONEY = /^\d{1,10}(\.\d{1,2})?$/;
-const MONEY_MESSAGE = 'Enter an amount, e.g. 9000 or 9000.50';
 const UNIT_MESSAGE = 'Choose days, weeks or months';
-
-const applyAll =
-  (decorators: PropertyDecorator[]): PropertyDecorator =>
-  (target, key) =>
-    decorators.forEach((d) => d(target, key));
-
-/** "ACTIVE,EXPIRED" or ?status=ACTIVE&status=EXPIRED → an array */
-const CommaList = () =>
-  Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string'
-      ? value.split(',').filter(Boolean)
-      : Array.isArray(value)
-        ? value.flatMap((v) => String(v).split(',')).filter(Boolean)
-        : value,
-  );
-
-/**
- * Money as a decimal string, never a float: numbers are turned into their exact
- * decimal text first, so 9000.5 arrives as "9000.5". Anything with more than two
- * decimals (including float artefacts like 0.30000000000000004) is rejected.
- */
-const Money = (message = MONEY_MESSAGE) =>
-  applyAll([
-    Transform(({ value }: { value: unknown }) =>
-      typeof value === 'number'
-        ? String(value)
-        : typeof value === 'string'
-          ? value.trim().replace(/,/g, '')
-          : value,
-    ),
-    IsString({ message }),
-    Matches(MONEY, { message }),
-  ]);
 
 const Text = (max: number, message?: string) =>
   applyAll([

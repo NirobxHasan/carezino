@@ -8,6 +8,7 @@ import { AppService } from './app.service';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
 import { CsrfGuard, PermissionsGuard, SessionGuard } from './auth/guards';
 import { throttlerOptions } from './auth/throttle';
 import { CenterSettingsModule } from './center-settings/center-settings.module';
@@ -42,6 +43,7 @@ import { TherapyTypesModule } from './therapy-types/therapy-types.module';
     TherapyPlansModule,
     PackagesModule,
     SessionsModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [

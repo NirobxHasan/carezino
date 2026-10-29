@@ -1,5 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
+  IsString,
+  Matches,
   ValidateBy,
   ValidateIf,
   type ValidationOptions,
@@ -11,6 +13,44 @@ import {
   normalizeMobile,
   normalizePhone,
 } from './identifiers';
+
+/** Applies several property decorators as one. */
+export const applyAll =
+  (decorators: PropertyDecorator[]): PropertyDecorator =>
+  (target, key) =>
+    decorators.forEach((d) => d(target, key));
+
+/** "ACTIVE,EXPIRED" or ?status=ACTIVE&status=EXPIRED → an array */
+export const CommaList = () =>
+  Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string'
+      ? value.split(',').filter(Boolean)
+      : Array.isArray(value)
+        ? value.flatMap((v) => String(v).split(',')).filter(Boolean)
+        : value,
+  );
+
+/** Up to 10 digits and 2 decimals, matching NUMERIC(12, 2) */
+const MONEY = /^\d{1,10}(\.\d{1,2})?$/;
+const MONEY_MESSAGE = 'Enter an amount, e.g. 9000 or 9000.50';
+
+/**
+ * Money as a decimal string, never a float: numbers are turned into their exact
+ * decimal text first, so 9000.5 arrives as "9000.5". Anything with more than two
+ * decimals (including float artefacts like 0.30000000000000004) is rejected.
+ */
+export const Money = (message = MONEY_MESSAGE) =>
+  applyAll([
+    Transform(({ value }: { value: unknown }) =>
+      typeof value === 'number'
+        ? String(value)
+        : typeof value === 'string'
+          ? value.trim().replace(/,/g, '')
+          : value,
+    ),
+    IsString({ message }),
+    Matches(MONEY, { message }),
+  ]);
 
 /** Trims strings and turns empty strings into undefined, so optional fields stay optional. */
 export const Trim = () =>

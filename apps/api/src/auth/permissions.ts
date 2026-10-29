@@ -184,6 +184,42 @@ export const PERMISSIONS = [
   'session_note_templates.read',
   /** Creating, editing, publishing, archiving and choosing default note templates */
   'session_note_templates.manage',
+  /** Billing preferences, priced services and payment methods, e.g. to choose them */
+  'billing.read',
+  /** The priced service catalog; invoice lines keep the price they were made with */
+  'billing_services.manage',
+  /** Billing preferences, payment methods and expense categories */
+  'billing_settings.manage',
+  /** Every invoice of the center with its lines, payments and balance */
+  'invoices.read',
+  /** Creating, editing and discarding draft invoices, at catalog and agreed prices */
+  'invoices.create',
+  /** Issuing drafts, which numbers them and makes them owed */
+  'invoices.issue',
+  /** Discounts, and line prices other than the service's */
+  'invoices.discount',
+  /** Extra charges for an appointment, e.g. a no-show fee or one a package covers */
+  'invoices.additional_charge',
+  /** Voiding issued invoices, with a reason; payments applied to them become credit */
+  'invoices.void',
+  /** Every payment and receipt of the center, with refunds and patient credit */
+  'payments.read',
+  /** Recording payments and applying them, or a patient's credit, to invoices */
+  'payments.collect',
+  /** Taking a payment off an invoice it was applied to, with a reason */
+  'payments.reallocate',
+  /** Returning unapplied money to the payer, with a reason */
+  'payments.refund',
+  /** Cancelling a payment recorded in error, with a reason */
+  'payments.reverse',
+  'expenses.read',
+  /** Recording expenses and correcting them, with a reason */
+  'expenses.create',
+  'expenses.void',
+  /** The center's collections, dues, expenses and package sales */
+  'finance_reports.read',
+  /** The caller's own collections, e.g. to close the front desk's day */
+  'finance_reports.read_own',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -314,6 +350,36 @@ const WRITE_OWN_NOTES: Permission[] = [
   'session_notes.amend',
 ];
 
+/**
+ * Front desk billing: invoicing at catalog and agreed prices, collecting payments,
+ * printing receipts and closing their own day. Discounts, voids, refunds, reversals
+ * and center-wide reports stay with managers and administrators.
+ */
+const FRONT_DESK_BILLING: Permission[] = [
+  'billing.read',
+  'invoices.read',
+  'invoices.create',
+  'invoices.issue',
+  'payments.read',
+  'payments.collect',
+  'finance_reports.read_own',
+];
+
+/** Billing oversight and corrections, besides the front desk's work. */
+const MANAGE_BILLING: Permission[] = [
+  ...FRONT_DESK_BILLING,
+  'invoices.discount',
+  'invoices.additional_charge',
+  'invoices.void',
+  'payments.reallocate',
+  'payments.refund',
+  'payments.reverse',
+  'expenses.read',
+  'expenses.create',
+  'expenses.void',
+  'finance_reports.read',
+];
+
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // Everything, including reading (and printing) every assessment and therapy plan.
   // Clinical writes stay limited to their own assessments and plans, for admins who also
@@ -352,6 +418,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'attendance.correct',
     'sessions.correct',
     'session_note_templates.read',
+    // Every billing operation and report; prices and preferences stay with admins.
+    ...MANAGE_BILLING,
   ],
   [Role.RECEPTIONIST]: [
     'center.read',
@@ -364,6 +432,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     ...PLAN_STATUS,
     ...SELL_PACKAGES,
     ...RUN_SESSIONS,
+    ...FRONT_DESK_BILLING,
   ],
   // Their own therapist profile, schedule and appointments only, never colleagues'
   // records. They can confirm, complete and mark no-shows on their own sessions; booking,
@@ -371,7 +440,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // (src/assessments/access.ts decides which), without access to the patient list,
   // and plan and review the treatment of those patients. No package permissions: their
   // appointments show which package covers a session, never prices or balances. They
-  // run and document their own sessions, including marking attendance.
+  // run and document their own sessions, including marking attendance. No billing.
   [Role.THERAPIST]: [
     'center.read',
     ...READ_CONFIGURATION,

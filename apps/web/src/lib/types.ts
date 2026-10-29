@@ -1585,7 +1585,7 @@ export interface TherapyPackage {
 }
 
 export type PatientPackageStatus = 'active' | 'completed' | 'expired' | 'cancelled';
-export type PaymentStatus = 'paid' | 'partial' | 'unpaid';
+export type PrototypePaymentStatus = 'paid' | 'partial' | 'unpaid';
 
 export interface PatientPackage {
   id: ID;
@@ -1604,52 +1604,52 @@ export interface PatientPackage {
   status: PatientPackageStatus;
 }
 
-export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'overdue' | 'void';
+export type PrototypeInvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'overdue' | 'void';
 
-export interface InvoiceItem {
+export interface PrototypeInvoiceItem {
   description: string;
   quantity: number;
   unitPrice: number;
 }
 
-export interface Invoice {
+export interface PrototypeInvoice {
   id: ID;
   number: string;
   patientId: ID;
   patientPackageId?: ID;
   issuedAt: ISODate;
   dueAt: ISODate;
-  items: InvoiceItem[];
+  items: PrototypeInvoiceItem[];
   discount: number;
   total: number;
   paid: number;
-  status: InvoiceStatus;
+  status: PrototypeInvoiceStatus;
 }
 
-export type PaymentMethod = 'cash' | 'bkash' | 'nagad' | 'card' | 'bank';
+export type PrototypePaymentMethod = 'cash' | 'bkash' | 'nagad' | 'card' | 'bank';
 
-export interface Payment {
+export interface PrototypePayment {
   id: ID;
   receiptNumber: string;
   invoiceId?: ID;
   patientId: ID;
   amount: number;
-  method: PaymentMethod;
+  method: PrototypePaymentMethod;
   reference?: string;
   receivedAt: ISODateTime;
   receivedBy: string;
 }
 
-export type ExpenseCategory =
+export type PrototypeExpenseCategory =
   'rent' | 'salary' | 'utilities' | 'supplies' | 'maintenance' | 'marketing' | 'other';
 
-export interface Expense {
+export interface PrototypeExpense {
   id: ID;
   date: ISODate;
-  category: ExpenseCategory;
+  category: PrototypeExpenseCategory;
   description: string;
   amount: number;
-  method: PaymentMethod;
+  method: PrototypePaymentMethod;
   paidTo?: string;
 }
 
@@ -2118,4 +2118,453 @@ export interface NoteTemplateDetail extends Omit<NoteTemplateItem, 'draft' | 'pu
 /** GET /session-note-templates/:id/versions */
 export interface NoteTemplateVersionItem extends Omit<TemplateVersionItem, 'assessmentCount'> {
   noteCount: number;
+}
+
+// ── Billing (served by the API) ─────────────────────────────────────────────
+// Invoices are obligations, payments money received, allocations how payments apply to
+// invoices; unapplied money is the patient's credit. Money is always a two-decimal
+// string from the API; previews are computed in whole paisa (see finance-display).
+
+type PersonRef = { id: ID; fullName: string };
+
+export type BillableServiceCategory = 'ASSESSMENT' | 'THERAPY_SESSION' | 'OTHER';
+export type AssessmentBillingPolicy = 'ON_BOOKING' | 'MANUAL';
+export type SessionBillingPolicy = 'ON_COMPLETION' | 'MANUAL';
+export type PackageBillingPolicy = 'ON_ENROLLMENT' | 'MANUAL';
+export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'VOID';
+export type InvoiceItemKind =
+  'PACKAGE' | 'ASSESSMENT_FEE' | 'SESSION_FEE' | 'ADDITIONAL_FEE' | 'OTHER';
+export type BillingDiscountType = 'FIXED' | 'PERCENTAGE';
+export type PaymentStatus = 'RECORDED' | 'REVERSED';
+export type AllocationReleaseReason = 'REALLOCATED' | 'INVOICE_VOIDED' | 'PAYMENT_REVERSED';
+export type ExpenseStatus = 'RECORDED' | 'VOID';
+export type AgingBucket = 'NOT_DUE' | 'DAYS_1_7' | 'DAYS_8_30' | 'DAYS_31_60' | 'DAYS_60_PLUS';
+
+/** GET /billing/settings */
+export interface BillingSettings {
+  invoicePrefix: string;
+  receiptPrefix: string;
+  defaultDueDays: number;
+  allowPartialPayment: boolean;
+  allowAdvancePayment: boolean;
+  allowManualDiscount: boolean;
+  /** Percentage; "0.00" means no tax */
+  taxRate: Money;
+  taxLabel: string;
+  assessmentBillingPolicy: AssessmentBillingPolicy;
+  sessionBillingPolicy: SessionBillingPolicy;
+  packageBillingPolicy: PackageBillingPolicy;
+  /** The center's own (center profile) */
+  currency: string;
+  timezone: string;
+  updatedAt: ISODateTime;
+}
+
+export interface PaymentMethodItem {
+  id: ID;
+  name: string;
+  requiresReference: boolean;
+  isActive: boolean;
+  displayOrder: number;
+}
+
+export interface ExpenseCategoryItem {
+  id: ID;
+  name: string;
+  isActive: boolean;
+  displayOrder: number;
+}
+
+export interface BillableServiceItem {
+  id: ID;
+  code: string;
+  name: string;
+  category: BillableServiceCategory;
+  therapyType: (TherapyTypeRef & { isActive: boolean }) | null;
+  price: Money;
+  defaultDurationMinutes: number | null;
+  description: string | null;
+  isActive: boolean;
+  displayOrder: number;
+  usageCount: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  actions: { edit: boolean; activate: boolean; deactivate: boolean };
+}
+
+export interface BillingPatientRef {
+  id: ID;
+  code: string;
+  fullName: string;
+  photoUrl: string | null;
+  status: PatientRecordStatus;
+  isDeleted: boolean;
+}
+
+export interface InvoiceActions {
+  edit: boolean;
+  discard: boolean;
+  issue: boolean;
+  collect: boolean;
+  void: boolean;
+}
+
+/** An invoice in lists */
+export interface InvoiceSummary {
+  id: ID;
+  number: string | null;
+  status: InvoiceStatus;
+  patient: BillingPatientRef;
+  invoiceDate: ISODate;
+  dueDate: ISODate | null;
+  currency: string;
+  subtotal: Money;
+  discountAmount: Money;
+  taxAmount: Money;
+  totalAmount: Money;
+  paidAmount: Money;
+  outstanding: Money;
+  overdue: boolean;
+  daysOverdue: number | null;
+  aging: AgingBucket | null;
+  itemCount: number;
+  automatic: boolean;
+  issuedAt: ISODateTime | null;
+  createdAt: ISODateTime;
+  actions: InvoiceActions;
+}
+
+export interface InvoiceLine {
+  id: ID;
+  position: number;
+  kind: InvoiceItemKind;
+  description: string;
+  quantity: number;
+  unitPrice: Money;
+  amount: Money;
+  discountType: BillingDiscountType | null;
+  discountValue: Money | null;
+  discountAmount: Money;
+  totalAmount: Money;
+  active: boolean;
+  service: { id: ID; code: string; name: string; category: BillableServiceCategory } | null;
+  appointment: {
+    id: ID;
+    type: AppointmentType;
+    status: AppointmentRecordStatus;
+    date: ISODate;
+    therapyType: TherapyTypeRef;
+    therapist: PersonRef;
+  } | null;
+  packageEnrollment: { id: ID; code: string; packageName: string } | null;
+}
+
+export interface InvoiceAllocation {
+  id: ID;
+  amount: Money;
+  createdAt: ISODateTime;
+  createdBy: PersonRef;
+  active: boolean;
+  releasedAt: ISODateTime | null;
+  releasedBy: PersonRef | null;
+  releaseReason: AllocationReleaseReason | null;
+  releaseNote: string | null;
+  payment: {
+    id: ID;
+    number: string;
+    collectedAt: ISODateTime;
+    status: PaymentStatus;
+    method: { id: ID; name: string };
+  };
+}
+
+/** GET /invoices/:id */
+export interface InvoiceDetail extends InvoiceSummary {
+  invoiceDiscount: { type: BillingDiscountType; value: Money; amount: Money } | null;
+  taxRate: Money;
+  taxLabel: string | null;
+  notes: string | null;
+  revision: number;
+  updatedAt: ISODateTime;
+  createdBy: PersonRef;
+  updatedBy: PersonRef | null;
+  issuedBy: PersonRef | null;
+  voidedAt: ISODateTime | null;
+  voidedBy: PersonRef | null;
+  voidReason: string | null;
+  reissuedFrom: { id: ID; number: string | null } | null;
+  reissues: { id: ID; number: string | null; status: InvoiceStatus }[];
+  items: InvoiceLine[];
+  allocations: InvoiceAllocation[];
+  patientCredit: Money;
+  history: { id: ID; action: string; at: ISODateTime; by: PersonRef | null; metadata: unknown }[];
+  actions: InvoiceActions & { applyCredit: boolean; reallocate: boolean };
+}
+
+export interface CenterLetterhead {
+  name: string;
+  code: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  district: string | null;
+  website: string | null;
+  logoUrl: string | null;
+}
+
+export interface PayerContact {
+  name: string | null;
+  relationship: string | null;
+  mobile: string | null;
+  email: string | null;
+  address: string | null;
+}
+
+/** GET /invoices/:id/print */
+export interface InvoicePrint {
+  center: CenterLetterhead;
+  contact: PayerContact;
+  invoice: InvoiceDetail;
+}
+
+/** Something a patient could be invoiced for: GET /billing/charges */
+export interface BillableCharge {
+  key: string;
+  kind: InvoiceItemKind;
+  description: string;
+  date: ISODate;
+  packageEnrollmentId: ID | null;
+  appointmentId: ID | null;
+  appointment: {
+    id: ID;
+    type: AppointmentType;
+    status: AppointmentRecordStatus;
+    date: ISODate;
+    therapyType: TherapyTypeRef;
+    therapist: PersonRef;
+  } | null;
+  service: { id: ID; code: string; name: string } | null;
+  /** Null when no active service prices it (see `problem`) */
+  unitPrice: Money | null;
+  problem: string | null;
+}
+
+export interface PaymentActions {
+  allocate: boolean;
+  refund: boolean;
+  reverse: boolean;
+  reallocate: boolean;
+}
+
+export interface PaymentSummary {
+  id: ID;
+  number: string;
+  status: PaymentStatus;
+  patient: BillingPatientRef;
+  amount: Money;
+  currency: string;
+  allocatedAmount: Money;
+  refundedAmount: Money;
+  unappliedAmount: Money;
+  method: { id: ID; name: string; isActive: boolean };
+  transactionReference: string | null;
+  collectedAt: ISODateTime;
+  collectedBy: PersonRef;
+  reversedAt: ISODateTime | null;
+  invoices: { id: ID; number: string | null }[];
+  createdAt: ISODateTime;
+  actions: PaymentActions;
+}
+
+export interface PaymentRefund {
+  id: ID;
+  amount: Money;
+  reason: string;
+  reference: string | null;
+  refundedAt: ISODateTime;
+  method: { id: ID; name: string; isActive: boolean };
+  approvedBy: PersonRef;
+}
+
+/** GET /payments/:id */
+export interface PaymentDetail extends PaymentSummary {
+  notes: string | null;
+  reversalReason: string | null;
+  reversedBy: PersonRef | null;
+  allocations: {
+    id: ID;
+    amount: Money;
+    active: boolean;
+    createdAt: ISODateTime;
+    createdBy: PersonRef;
+    releasedAt: ISODateTime | null;
+    releasedBy: PersonRef | null;
+    releaseReason: AllocationReleaseReason | null;
+    releaseNote: string | null;
+    invoice: {
+      id: ID;
+      number: string | null;
+      status: InvoiceStatus;
+      invoiceDate: ISODate;
+      totalAmount: Money;
+      outstanding: Money;
+    };
+  }[];
+  refunds: (PaymentRefund & { createdAt: ISODateTime })[];
+  /** Always false: manual records are not confirmed by any payment provider */
+  verified: false;
+}
+
+export interface ExpenseItem {
+  id: ID;
+  expenseDate: ISODate;
+  description: string;
+  amount: Money;
+  reference: string | null;
+  notes: string | null;
+  status: ExpenseStatus;
+  revision: number;
+  corrections: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  voidedAt: ISODateTime | null;
+  voidReason: string | null;
+  category: { id: ID; name: string; isActive: boolean };
+  method: { id: ID; name: string; isActive: boolean };
+  createdBy: PersonRef;
+  updatedBy: PersonRef | null;
+  voidedBy: PersonRef | null;
+  actions: { correct: boolean; void: boolean };
+}
+
+export interface ExpenseDetail extends ExpenseItem {
+  revisions: {
+    id: ID;
+    reason: string;
+    changed: string[];
+    before: Record<string, string | null>;
+    after: Record<string, string | null>;
+    createdAt: ISODateTime;
+    createdBy: PersonRef;
+  }[];
+}
+
+/** GET /finance/summary */
+export interface FinanceSummary {
+  currency: string;
+  from: ISODate | null;
+  to: ISODate;
+  today: ISODate;
+  todayCollections: Money;
+  todayPayments: number;
+  todayRefunds: Money;
+  collections: Money;
+  payments: number;
+  refunds: Money;
+  netCollections: Money;
+  invoiced: Money;
+  invoiceCount: number;
+  outstanding: Money;
+  outstandingInvoices: number;
+  overdue: Money;
+  overdueInvoices: number;
+  unappliedCredit: Money;
+  expenses: Money;
+  expenseCount: number;
+  netCashMovement: Money;
+  byMethod: {
+    method: { id: ID; name: string };
+    payments: number;
+    collected: Money;
+    refunds: Money;
+    expenses: Money;
+    net: Money;
+  }[];
+  recentPayments: PaymentSummary[];
+  outstandingList: InvoiceSummary[];
+  recentExpenses: ExpenseItem[];
+}
+
+export interface DueItem extends InvoiceSummary {
+  contact: PayerContact;
+}
+
+/** GET /finance/dues */
+export interface DuesPage extends Paginated<DueItem> {
+  currency: string;
+  outstanding: Money;
+  aging: { bucket: AgingBucket; invoices: number; outstanding: Money }[];
+}
+
+/** GET /finance/collections */
+export interface CollectionsReport {
+  currency: string;
+  from: ISODate | null;
+  to: ISODate;
+  collectedById: ID | null;
+  rows: {
+    date: ISODate;
+    collector: PersonRef | null;
+    method: { id: ID; name: string } | null;
+    payments: number;
+    collected: Money;
+    reversedPayments: number;
+    reversed: Money;
+    refundCount: number;
+    refunds: Money;
+    net: Money;
+  }[];
+  totals: {
+    payments: number;
+    collected: Money;
+    reversedPayments: number;
+    reversed: Money;
+    refundCount: number;
+    refunds: Money;
+    net: Money;
+  };
+}
+
+/** GET /finance/expenses-summary */
+export interface ExpensesSummary {
+  currency: string;
+  from: ISODate | null;
+  to: ISODate;
+  categories: { category: { id: ID; name: string } | null; expenses: number; amount: Money }[];
+  methods: { method: { id: ID; name: string } | null; expenses: number; amount: Money }[];
+  total: Money;
+  count: number;
+}
+
+/** GET /finance/package-sales */
+export interface PackageSalesReport {
+  currency: string;
+  from: ISODate | null;
+  to: ISODate;
+  rows: {
+    package: { id: ID; name: string; code: string };
+    enrollments: number;
+    cancelled: number;
+    uninvoiced: number;
+    agreed: Money;
+    invoiced: Money;
+    collected: Money;
+  }[];
+  totals: { enrollments: number; agreed: Money; invoiced: Money; collected: Money };
+}
+
+/** GET /patients/:id/billing-summary */
+export interface PatientBillingSummary {
+  patient: { id: ID; code: string; fullName: string };
+  currency: string;
+  outstanding: Money;
+  openInvoices: number;
+  overdue: Money;
+  overdueInvoices: number;
+  unappliedCredit: Money;
+  invoiced: Money;
+  paid: Money;
+  refunded: Money;
+  draftInvoices: number;
+  uninvoicedCharges: number | null;
 }

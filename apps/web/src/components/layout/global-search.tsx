@@ -121,8 +121,8 @@ export function GlobalSearch() {
                         <CalendarPlus /> Book appointment
                       </CommandItem>
                     )}
-                    {can('finance.manage') && (
-                      <CommandItem value="pay" onSelect={() => go('/finance?tab=dues')}>
+                    {can('payments.collect') && (
+                      <CommandItem value="pay" onSelect={() => go('/finance/dues')}>
                         <CreditCard /> Collect payment
                       </CommandItem>
                     )}

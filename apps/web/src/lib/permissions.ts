@@ -97,18 +97,32 @@ export const API_PERMISSIONS = [
   'session_notes.amend',
   'session_note_templates.read',
   'session_note_templates.manage',
+  'billing.read',
+  'billing_services.manage',
+  'billing_settings.manage',
+  'invoices.read',
+  'invoices.create',
+  'invoices.issue',
+  'invoices.discount',
+  'invoices.additional_charge',
+  'invoices.void',
+  'payments.read',
+  'payments.collect',
+  'payments.reallocate',
+  'payments.refund',
+  'payments.reverse',
+  'expenses.read',
+  'expenses.create',
+  'expenses.void',
+  'finance_reports.read',
+  'finance_reports.read_own',
 ] as const;
 
 export type ApiPermission = (typeof API_PERMISSIONS)[number];
 
 /** Permissions for prototype modules that aren't on the API yet. */
 export type ModulePermission =
-  | 'dashboard.view'
-  | 'clinical.view'
-  | 'clinical.write'
-  | 'finance.view'
-  | 'finance.manage'
-  | 'reports.view';
+  'dashboard.view' | 'clinical.view' | 'clinical.write' | 'reports.view';
 
 export type Permission = ApiPermission | ModulePermission;
 
@@ -116,8 +130,6 @@ const ALL_MODULES: ModulePermission[] = [
   'dashboard.view',
   'clinical.view',
   'clinical.write',
-  'finance.view',
-  'finance.manage',
   'reports.view',
 ];
 
@@ -128,7 +140,7 @@ const ALL_MODULES: ModulePermission[] = [
 export const modulePermissions: Record<Role, ModulePermission[]> = {
   CENTER_ADMIN: ALL_MODULES,
   MANAGER: ALL_MODULES,
-  RECEPTIONIST: ['dashboard.view', 'finance.view', 'finance.manage'],
+  RECEPTIONIST: ['dashboard.view'],
   THERAPIST: ['dashboard.view', 'clinical.view', 'clinical.write'],
 };
 

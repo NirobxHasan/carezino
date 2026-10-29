@@ -10,6 +10,7 @@ import { OPEN_STATUSES } from '../appointments/rules';
 import type { SessionOutcomes } from '../appointments/sessions.port';
 import { AuditService } from '../audit/audit.service';
 import type { TenantContext } from '../auth/auth-context';
+import { BillingEvents } from '../billing/events.service';
 import { SettingsService } from '../center-settings/settings.service';
 import { isUniqueViolation } from '../centers/centers.service';
 import { apiError } from '../common/errors';
@@ -164,6 +165,7 @@ export class SessionLifecycle implements SessionOutcomes {
     private readonly packages: PackageSessions,
     private readonly settings: SettingsService,
     private readonly audit: AuditService,
+    private readonly billing: BillingEvents,
   ) {}
 
   async center(tenant: TenantContext) {
@@ -729,6 +731,8 @@ export class SessionLifecycle implements SessionOutcomes {
         newValues: { status: AppointmentStatus.COMPLETED },
       });
     });
+    // After the completion has committed: billing never undoes it.
+    await this.billing.sessionCompleted(tenant, row.id);
   }
 
   private async completeSession(

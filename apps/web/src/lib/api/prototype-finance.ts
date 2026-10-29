@@ -1,17 +1,26 @@
 'use client';
 
+// The dashboard prototype's mock finance data. Real billing screens use ./billing.ts.
+
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 
-import type { Expense, ID, Invoice, InvoiceStatus, Payment, PaymentMethod } from '../types';
+import type {
+  PrototypeExpense,
+  ID,
+  PrototypeInvoice,
+  PrototypeInvoiceStatus,
+  PrototypePayment,
+  PrototypePaymentMethod,
+} from '../types';
 import { backend, clone, latency, uid } from './client';
 import { keys } from './keys';
 import { patientRef, type PatientRef } from './refs';
 
-export type InvoiceWithRefs = Invoice & { patient: PatientRef; balance: number };
-export type PaymentWithRefs = Payment & { patient: PatientRef; invoiceNumber?: string };
+export type InvoiceWithRefs = PrototypeInvoice & { patient: PatientRef; balance: number };
+export type PaymentWithRefs = PrototypePayment & { patient: PatientRef; invoiceNumber?: string };
 
-export const paymentMethodLabels: Record<PaymentMethod, string> = {
+export const paymentMethodLabels: Record<PrototypePaymentMethod, string> = {
   cash: 'Cash',
   bkash: 'bKash',
   nagad: 'Nagad',
@@ -20,7 +29,7 @@ export const paymentMethodLabels: Record<PaymentMethod, string> = {
 };
 
 export async function listInvoices(params: {
-  status?: InvoiceStatus | 'all' | 'outstanding';
+  status?: PrototypeInvoiceStatus | 'all' | 'outstanding';
   patientId?: ID;
   search?: string;
 }): Promise<InvoiceWithRefs[]> {
@@ -85,12 +94,12 @@ export interface PaymentInput {
   patientId: ID;
   invoiceId?: ID;
   amount: number;
-  method: PaymentMethod;
+  method: PrototypePaymentMethod;
   reference?: string;
   receivedBy: string;
 }
 
-export async function recordPayment(input: PaymentInput): Promise<Payment> {
+export async function recordPayment(input: PaymentInput): Promise<PrototypePayment> {
   await latency(500);
   const db = backend();
   if (input.amount <= 0) throw new Error('Amount must be greater than zero.');
@@ -107,7 +116,7 @@ export async function recordPayment(input: PaymentInput): Promise<Payment> {
     const pkg = db.patientPackages.find((p) => p.id === invoice.patientPackageId);
     if (pkg) pkg.paidAmount += input.amount;
   }
-  const payment: Payment = {
+  const payment: PrototypePayment = {
     id: uid('pay'),
     receiptNumber: `RCP-${5001 + db.payments.length}`,
     invoiceId: input.invoiceId,
@@ -122,14 +131,14 @@ export async function recordPayment(input: PaymentInput): Promise<Payment> {
   return clone(payment);
 }
 
-export async function listExpenses(): Promise<Expense[]> {
+export async function listExpenses(): Promise<PrototypeExpense[]> {
   await latency();
   return clone([...backend().expenses].sort((a, b) => b.date.localeCompare(a.date)));
 }
 
-export async function addExpense(input: Omit<Expense, 'id'>): Promise<Expense> {
+export async function addExpense(input: Omit<PrototypeExpense, 'id'>): Promise<PrototypeExpense> {
   await latency(400);
-  const expense: Expense = { ...input, id: uid('exp') };
+  const expense: PrototypeExpense = { ...input, id: uid('exp') };
   backend().expenses.push(expense);
   return clone(expense);
 }
@@ -140,7 +149,7 @@ export interface FinanceSummary {
   net: number;
   outstanding: number;
   overdueCount: number;
-  byMethod: { method: PaymentMethod; amount: number; count: number }[];
+  byMethod: { method: PrototypePaymentMethod; amount: number; count: number }[];
   daily: { date: string; amount: number; count: number }[];
 }
 
@@ -163,7 +172,7 @@ export async function getFinanceSummary(params: {
   const collected = payments.reduce((s, p) => s + p.amount, 0);
   const spent = expenses.reduce((s, e) => s + e.amount, 0);
   const outstandingInvoices = db.invoices.filter((i) => i.status !== 'void' && i.total > i.paid);
-  const byMethod = (Object.keys(paymentMethodLabels) as PaymentMethod[]).map((method) => {
+  const byMethod = (Object.keys(paymentMethodLabels) as PrototypePaymentMethod[]).map((method) => {
     const items = payments.filter((p) => p.method === method);
     return { method, amount: items.reduce((s, p) => s + p.amount, 0), count: items.length };
   });

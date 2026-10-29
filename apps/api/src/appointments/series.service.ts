@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 
 import type { TenantContext } from '../auth/auth-context';
+import { BillingEvents } from '../billing/events.service';
 import { LIMITS } from '../center-settings/limits';
 import { apiError } from '../common/errors';
 import {
@@ -15,6 +16,7 @@ import {
   AppointmentHistoryAction,
   AppointmentSeriesStatus,
   AppointmentStatus,
+  AppointmentType,
 } from '../generated/prisma/enums';
 import { PackageSessions } from '../packages/sessions.service';
 import { assertCan } from '../patients/access';
@@ -73,6 +75,7 @@ export class SeriesService {
     private readonly prisma: PrismaService,
     private readonly booking: BookingService,
     private readonly packages: PackageSessions,
+    private readonly billing: BillingEvents,
   ) {}
 
   /** The rule as dates, rejecting rules that would book too much or nothing. */
@@ -396,8 +399,19 @@ export class SeriesService {
           },
         })),
       });
-      return { id: series.id, created: created.length, skipped: skippedList };
+      return {
+        id: series.id,
+        created: created.length,
+        ids: created.map((a) => a.id),
+        skipped: skippedList,
+      };
     });
+    // After the booking has committed: billing never undoes it.
+    if (dto.type === AppointmentType.ASSESSMENT) {
+      for (const appointmentId of result.ids) {
+        await this.billing.appointmentBooked(tenant, appointmentId);
+      }
+    }
     return {
       series: await this.get(tenant, result.id),
       created: result.created,

@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 
 import { AuditService } from '../audit/audit.service';
+import { BillingEvents } from '../billing/events.service';
 import type { TenantContext } from '../auth/auth-context';
 import { SettingsService } from '../center-settings/settings.service';
 import { isUniqueViolation } from '../centers/centers.service';
@@ -133,6 +134,7 @@ export class EnrollmentsService {
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
     private readonly sessions: PackageSessions,
+    private readonly billing: BillingEvents,
   ) {}
 
   /** The center's time zone, currency, week start and today's date there. */
@@ -944,6 +946,8 @@ export class EnrollmentsService {
       }
       throw error;
     }
+    // After the enrollment has committed: billing never undoes a purchase.
+    await this.billing.enrollmentCreated(tenant, id);
     return this.get(tenant, id);
   }
 
